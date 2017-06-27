@@ -1,0 +1,4 @@
+[Project]
+Name=hand_learning
+Manager=KDevCMakeManager
+VersionControl=kdevgit
