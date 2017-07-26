@@ -7,6 +7,8 @@
 #include <pcl/console/parse.h>
 
 #include <iostream>
+#include <boost/foreach.hpp>
+#include <pcl_conversions/pcl_conversions.h>
 
 /* Includes of Hannes */
 #include <opencv2/core/core.hpp>
@@ -44,7 +46,8 @@ using namespace pcl;
 
 /* ######################### Methods ############################## */
 void printUsage(const char*);
-void grabberCallback(const PointCloud<PointXYZRGB>::ConstPtr&);
+void grabberCallback(const PointCloud<PointXYZRGBA>::ConstPtr&);
+void removeBackground(PointCloud<PointXYZRGB>::Ptr&);
 
 void convertImage(const pcl::PointCloud<pcl::PointXYZRGB> &cloud, cv::Mat &image);
 void convertImage(const pcl::PointCloud<pcl::PointXYZRGBA> &_cloud, cv::Mat &_image);
@@ -58,9 +61,13 @@ void stopTracker();
 void trackImage(const PointCloud<PointXYZRGB>::ConstPtr&);
 
 
+/* ######################### Constants ############################# */
+const float bad_point = std::numeric_limits<float>::quiet_NaN();
+
+
 
 /* ######################### Variables ############################# */
-PointCloud<PointXYZRGB>::Ptr cloudptr(new PointCloud<PointXYZRGB>); 	// A cloud that will store color info.
+PointCloud<PointXYZRGB>::Ptr mycloud (new PointCloud<PointXYZRGB>); 	// A cloud that will store color info.
 Grabber* openniGrabber;                                               	// OpenNI grabber that takes data from the device.
 unsigned int filesSaved = 0;                                          	// For the numbering of the clouds saved to disk.
 bool stopCamera(false);							// Stop the camera callback
@@ -122,7 +129,7 @@ int main(int argc, char** argv)
 	openniGrabber = new OpenNIGrabber();
 	if (openniGrabber == 0)
 		return -1;
-	boost::function<void (const PointCloud<PointXYZRGB>::ConstPtr&)> f =
+	boost::function<void (const PointCloud<PointXYZRGBA>::ConstPtr&)> f =
 		boost::bind(&grabberCallback, _1);
 	openniGrabber->registerCallback(f);
 	
@@ -173,13 +180,18 @@ void printUsage(const char* programName)
 /*********************************************************************
  * This function is called every time the device has new data.
  ********************************************************************/
-void grabberCallback(const PointCloud<PointXYZRGB>::ConstPtr& cloud)
+void grabberCallback(const PointCloud<PointXYZRGBA>::ConstPtr& cloud)
 {
+	// copy to the pcl for write-access
+	pcl::copyPointCloud<pcl::PointXYZRGBA, pcl::PointXYZRGB>(*cloud, *mycloud);
+	removeBackground(mycloud);
+	
 	int key= cv::waitKey(100);
 	if (mode == capture)
 	{
+		
 		// Print the current view of the camera
-		convertImage(*cloud, image);
+		convertImage(*mycloud, image);
 	    	image.copyTo(im_draw);
 		cv::imshow("image",im_draw);
 		
@@ -194,7 +206,13 @@ void grabberCallback(const PointCloud<PointXYZRGB>::ConstPtr& cloud)
 	
 	if (mode == tracking)
 	{
-		trackImage(cloud);
+		trackImage(mycloud);
+		if (!have_pose)
+		{
+			stopCamera = true;
+			mode = capture;
+		}
+		
 	}
 	
 	
@@ -209,7 +227,7 @@ void grabberCallback(const PointCloud<PointXYZRGB>::ConstPtr& cloud)
 		stringstream stream;
 		stream << "inputCloud" << filesSaved << ".pcd";
 		string filename = stream.str();
-		if (io::savePCDFile(filename, *cloud, true) == 0)
+		if (io::savePCDFile(filename, *mycloud, true) == 0)
 		{
 			filesSaved++;
 			cout << "Saved " << filename << "." << endl;
@@ -217,6 +235,28 @@ void grabberCallback(const PointCloud<PointXYZRGB>::ConstPtr& cloud)
 		else PCL_ERROR("Problem saving %s.\n", filename.c_str());
 	}
 }
+
+/*********************************************************************
+ * This function removes the background of the image
+ ********************************************************************/
+void removeBackground(PointCloud<PointXYZRGB>::Ptr& cloud)
+{
+	BOOST_FOREACH (pcl::PointXYZRGB& pt, cloud->points)
+	{
+		if(pt.z > 1.5)
+		{
+			pt.x = bad_point;
+			pt.y = bad_point;
+			pt.z = bad_point;
+			pt.r = 255;
+			pt.g = 255;
+			pt.b = 255;
+		}
+		//printf ("\t(%f, %f, %f, %d, %d, %d)\n", pt.x, pt.y, pt.z, pt.r, pt.g, pt.b);
+		
+	}   		
+}
+
 
 /*********************************************************************
  * This function tracks one image
