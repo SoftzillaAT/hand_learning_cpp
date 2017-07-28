@@ -42,6 +42,16 @@ using namespace std;
 using namespace pcl;
 
 
+/* ######################### Macros ############################### */
+#if DEBUG_LEVEL == 2  
+	#define DEBUG(l,x) if(l<=2) x
+#endif
+#if DEBUG_LEVEL == 1  
+	#define DEBUG(l,x) if(l<=1) x
+#endif
+#if DEBUG_LEVEL == 0
+	#define DEBUG(l,x)
+#endif 
 
 
 /* ######################### Methods ############################## */
@@ -71,7 +81,7 @@ PointCloud<PointXYZRGB>::Ptr mycloud (new PointCloud<PointXYZRGB>); 	// A cloud 
 Grabber* openniGrabber;                                               	// OpenNI grabber that takes data from the device.
 unsigned int filesSaved = 0;                                          	// For the numbering of the clouds saved to disk.
 bool stopCamera(false);							// Stop the camera callback
-enum Mode { capture, tracking };					// Current mode
+enum Mode { capture, tracking, stop };					// Current mode
 Mode mode = capture;							// Start with capturing images
 
 v4r::TSFVisualSLAM tsf;
@@ -119,6 +129,8 @@ cv::Point track_win[2];
  ********************************************************************/
 int main(int argc, char** argv)
 {
+	DEBUG(1, cout << "DEBUG_LEVEL 1 enabled" << endl);
+  	DEBUG(2, cout << "DEBUG_LEVEL 2 enabled" << endl);
 	if (console::find_argument(argc, argv, "-h") >= 0)
 	{
 		printUsage(argv[0]);
@@ -143,17 +155,20 @@ int main(int argc, char** argv)
 	openniGrabber->start();
 
 	while(!stopCamera)
+	{
 		boost::this_thread::sleep(boost::posix_time::seconds(1));
-
+		DEBUG(2, cout << "Check stop camera: " << stopCamera << endl);
+	}
+	
+	DEBUG(1, cout << "Stoping OpenNi" << endl);
 	// stop the camera 
 	openniGrabber->stop();
 	
-	// stop the tracker
-	if (mode == tracking)
+	// stop the tracker if something caught tracked
+	if (i > 0)
 		stopTracker();
 	
-	
-	cout<<"Finished!"<<endl;
+	DEBUG(1, cout<<"Finished!"<<endl);
 
 
 	return 0;
@@ -182,6 +197,7 @@ void printUsage(const char* programName)
  ********************************************************************/
 void grabberCallback(const PointCloud<PointXYZRGBA>::ConstPtr& cloud)
 {
+	DEBUG(2, cout << "Callback..." << endl);
 	// copy to the pcl for write-access
 	pcl::copyPointCloud<pcl::PointXYZRGBA, pcl::PointXYZRGB>(*cloud, *mycloud);
 	removeBackground(mycloud);
@@ -189,6 +205,7 @@ void grabberCallback(const PointCloud<PointXYZRGBA>::ConstPtr& cloud)
 	int key= cv::waitKey(100);
 	if (mode == capture)
 	{
+		DEBUG(2, cout << "Mode Capture" << endl);
 		
 		// Print the current view of the camera
 		convertImage(*mycloud, image);
@@ -199,20 +216,27 @@ void grabberCallback(const PointCloud<PointXYZRGBA>::ConstPtr& cloud)
 		// if user hits 'space'
 		if (((char)key) == 32)
 		{
-			cout << "Start Tracking..." << endl;
+			DEBUG(2, cout << "Start Tracking..." << endl);
 			mode = tracking;
 		}
 	}
 	
 	if (mode == tracking)
 	{
+		DEBUG(2, cout << "Mode tracking" << endl);
 		trackImage(mycloud);
 		if (!have_pose)
 		{
-			stopCamera = true;
-			mode = capture;
+			mode = stop;
 		}
 		
+	}
+	
+	if (mode == stop)
+	{
+		DEBUG(2, cout << "Mode stop" << endl);
+		stopCamera = true;
+		return;
 	}
 	
 	
@@ -243,7 +267,7 @@ void removeBackground(PointCloud<PointXYZRGB>::Ptr& cloud)
 {
 	BOOST_FOREACH (pcl::PointXYZRGB& pt, cloud->points)
 	{
-		if(pt.z > 1.5)
+		if(pt.z > 1)
 		{
 			pt.x = bad_point;
 			pt.y = bad_point;
@@ -278,7 +302,7 @@ void trackImage(const PointCloud<PointXYZRGB>::ConstPtr& cloud)
 
 	// ---- END batch filtering ---
 
-	cout<<"conf (ransac, tracked points): "<<conf_ransac_iter<<", "<<conf_tracked_points<<endl;
+	DEBUG(1, cout<<"conf (ransac, tracked points): "<<conf_ransac_iter<<", "<<conf_tracked_points<<endl);
 	if (!have_pose) cout<<"Lost pose!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"<<endl;
 
 	all_poses.push_back(std::make_pair(pose,-1));
@@ -289,17 +313,17 @@ void trackImage(const PointCloud<PointXYZRGB>::ConstPtr& cloud)
 
 	mean_time += mytime;
 	cnt_time++;
-	cout<<"mean="<<mean_time/double(cnt_time)<<"ms ("<<1000./(mean_time/double(cnt_time))<<"fps)"<<endl;
-	cout<<"timestamp (c/f): "<<i<<"/"<<timestamp<<endl;
+	DEBUG(1, cout<<"mean="<<mean_time/double(cnt_time)<<"ms ("<<1000./(mean_time/double(cnt_time))<<"fps)"<<endl);
+	DEBUG(1, cout<<"timestamp (c/f): "<<i<<"/"<<timestamp<<endl);
 
 	// debug out draw
-	int key=0;
 	if (display)
 	{
 		drawConfidenceBar(im_draw, conf_ransac_iter, 50, 200, 30);
 		drawConfidenceBar(im_draw, conf_tracked_points, 50, 200, 50);
 		cv::imshow("image",im_draw);
-		if (conf_ransac_iter<0.2) cv::waitKey(0);
+		
+		//if (conf_ransac_iter<0.2) cv::waitKey(0); // Not sure what this do
 	}
 	else usleep(50000);
 	
@@ -313,7 +337,7 @@ void trackImage(const PointCloud<PointXYZRGB>::ConstPtr& cloud)
  ********************************************************************/
 void initTracker()
 {
-	cout << "Init Tracker..." << endl;
+	DEBUG(1, cout << "Init Tracker..." << endl);
 	mean_time=0;
 	cnt_time=0;
 
@@ -354,7 +378,7 @@ void initTracker()
  ********************************************************************/
 void stopTracker()
 {
-	cout << "Stop tracking..." << endl;
+	DEBUG(1, cout << "Stop tracking..." << endl);
 	// optimize map
 	tsf.stop();
 	tsf.optimizeMap();

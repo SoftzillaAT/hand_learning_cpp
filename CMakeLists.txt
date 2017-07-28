@@ -1,3 +1,4 @@
+cmake_minimum_required (VERSION 2.6)
 project(hand_learning)
 
 find_package(V4R REQUIRED)
@@ -11,6 +12,12 @@ include_directories(include
 	${PCL_INCLUDE_DIRS}
 	"/usr/include/libusb-1.0/"
 )
+
+#define Debug level
+# 0=No debug information
+# 1=Some important debug information
+# 2=All debug information
+add_definitions(-DDEBUG_LEVEL=1)
 
 add_executable(hand_learning main.cpp)
 
