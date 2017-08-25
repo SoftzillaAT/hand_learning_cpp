@@ -10,6 +10,18 @@
 #include <boost/foreach.hpp>
 #include <pcl_conversions/pcl_conversions.h>
 
+#include <pcl/ModelCoefficients.h>
+#include <pcl/point_types.h>
+#include <pcl/filters/extract_indices.h>
+#include <pcl/filters/voxel_grid.h>
+#include <pcl/features/normal_3d.h>
+#include <pcl/kdtree/kdtree.h>
+#include <pcl/sample_consensus/method_types.h>
+#include <pcl/sample_consensus/model_types.h>
+#include <pcl/segmentation/sac_segmentation.h>
+#include <pcl/segmentation/extract_clusters.h>
+
+
 /* Includes of Hannes */
 #include <opencv2/core/core.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
@@ -73,6 +85,7 @@ void trackImage(const PointCloud<PointXYZRGB>::ConstPtr&);
 
 /* ######################### Constants ############################# */
 const float bad_point = std::numeric_limits<float>::quiet_NaN();
+const int max_loose_pose = 10; 						// Maximum number of lost poses until the grabber ends
 
 
 
@@ -95,6 +108,7 @@ double conf_tracked_points;
 uint64_t ts_last;
 int i;									// index of the current tracking
 bool have_pose(true);
+int lost_pose_counter;
 double mytime;
 double mean_time;
 int cnt_time;
@@ -225,7 +239,7 @@ void grabberCallback(const PointCloud<PointXYZRGBA>::ConstPtr& cloud)
 	{
 		DEBUG(2, cout << "Mode tracking" << endl);
 		trackImage(mycloud);
-		if (!have_pose)
+		if (lost_pose_counter >= max_loose_pose)
 		{
 			mode = stop;
 		}
@@ -303,8 +317,15 @@ void trackImage(const PointCloud<PointXYZRGB>::ConstPtr& cloud)
 	// ---- END batch filtering ---
 
 	DEBUG(1, cout<<"conf (ransac, tracked points): "<<conf_ransac_iter<<", "<<conf_tracked_points<<endl);
-	if (!have_pose) cout<<"Lost pose!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"<<endl;
-
+	if (!have_pose) 
+	{
+		lost_pose_counter++;
+		cout<<"############################ Lost pose: " << lost_pose_counter << "  #############################" << endl;
+	}
+	else
+	{
+		lost_pose_counter = 0;
+	}
 	all_poses.push_back(std::make_pair(pose,-1));
 	v4r::invPose(pose, inv_pose);
 
@@ -338,8 +359,9 @@ void trackImage(const PointCloud<PointXYZRGB>::ConstPtr& cloud)
 void initTracker()
 {
 	DEBUG(1, cout << "Init Tracker..." << endl);
-	mean_time=0;
-	cnt_time=0;
+	mean_time = 0;
+	cnt_time = 0;
+	lost_pose_counter = 0;
 
 	intrinsic(0,0)=intrinsic(1,1)=525;
 	intrinsic(0,2)=320, intrinsic(1,2)=240;
