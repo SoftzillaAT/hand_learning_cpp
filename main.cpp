@@ -2,6 +2,8 @@
 // written by Dominik Streicher
 // based on Hannes Prankl camera_tracking_and_mapping
 
+// TODO mean shift circles. number in circle. dynamic number of particles, radius should depend on distance
+
 #include <pcl/io/openni_grabber.h>
 #include <pcl/io/pcd_io.h>
 #include <pcl/console/parse.h>
@@ -20,7 +22,15 @@
 #include <pcl/sample_consensus/model_types.h>
 #include <pcl/segmentation/sac_segmentation.h>
 #include <pcl/segmentation/extract_clusters.h>
+#include <pcl/segmentation/region_growing_rgb.h>
+#include <pcl/filters/passthrough.h>
+#include <pcl/visualization/cloud_viewer.h>
+#include <pcl/common/centroid.h>
 
+
+#include <cv.h>
+#include <highgui.h>
+#include <opencv2/calib3d/calib3d.hpp>
 
 /* Includes of Hannes */
 #include <opencv2/core/core.hpp>
@@ -69,14 +79,22 @@ using namespace pcl;
 /* ######################### Methods ############################## */
 void printUsage(const char*);
 void grabberCallback(const PointCloud<PointXYZRGBA>::ConstPtr&);
-void removeBackground(PointCloud<PointXYZRGB>::Ptr&);
+void calculateCameraSettings(PointCloud<PointXYZRGB>::Ptr& cloud);
+void removeBackground(PointCloud<PointXYZRGB>::Ptr&, PointCloud<PointXYZRGB>::Ptr&);
+void postProcessing(PointCloud<PointXYZRGB>::Ptr&);
+void calcMeanShift(cv::Point3f &p, PointCloud<PointXYZRGB>::Ptr&, float radius);
 
 void convertImage(const pcl::PointCloud<pcl::PointXYZRGB> &cloud, cv::Mat &image);
 void convertImage(const pcl::PointCloud<pcl::PointXYZRGBA> &_cloud, cv::Mat &_image);
 void convertImage(const pcl::PointCloud<pcl::PointXYZRGBNormal> &_cloud, cv::Mat &_image);
+void convertImage(const pcl::PointCloud<pcl::PointXYZRGB> &_cloud, cv::Mat &_image, int width, int height);
+
 
 void drawCoordinateSystem(cv::Mat &im, const Eigen::Matrix4f &pose, const cv::Mat_<double> &intrinsic, const cv::Mat_<double> &dist_coeffs, double size, int thickness);
 void drawConfidenceBar(cv::Mat &im, const double &conf, int x_start=50, int x_end=200, int y=30);
+
+bool lexico_compare(const cv::Point2f& p1, const cv::Point2f& p2);
+bool points_are_equal(const cv::Point2f& p1, const cv::Point2f& p2);
 
 void initTracker();
 void stopTracker();
@@ -86,6 +104,7 @@ void trackImage(const PointCloud<PointXYZRGB>::ConstPtr&);
 /* ######################### Constants ############################# */
 const float bad_point = std::numeric_limits<float>::quiet_NaN();
 const int max_loose_pose = 10; 						// Maximum number of lost poses until the grabber ends
+const int num_particles = 20;
 
 
 
@@ -122,21 +141,31 @@ std::string cam_file, filenames;
 std::string file_mesh = "mesh.ply";
 std::string file_cloud = "cloud.pcd";
 
-cv::Mat_<double> distCoeffs;// = cv::Mat::zeros(4, 1, CV_64F);
+cv::Mat_<double> distCoeffs = cv::Mat::zeros(4, 1, CV_64F);
 cv::Mat_<double> intrinsic = cv::Mat_<double>::eye(3,3);
 cv::Mat_<double> dist_coeffs_opti = cv::Mat::zeros(4, 1, CV_64F);
 cv::Mat_<double> intrinsic_opti = cv::Mat_<double>::eye(3,3);
-cv::Mat_<double> intrinsic_tsf = cv::Mat_<double>::eye(3,3);
 
 Eigen::Matrix4f pose;
-float voxel_size = 0.0005;
+float voxel_size = 0.005;//0.0005;
 double thr_weight = 2;      //e.g. 10    // surfel threshold for the final model
 double thr_delta_angle = 80; // e.g. 80
 int poisson_depth = 6;
 int display = true;
 
+int max_camera_distance = 150; // in [cm]
+
 cv::Point track_win[2];
 
+std::vector<cv::Point3f> mean_shift_points(num_particles);
+boost::thread t[num_particles];
+
+int mean_shift_radius = 15; // in cm
+
+// camera parameter
+bool init_camera = false;
+cv::Mat rvec = cv::Mat::zeros(3, 1, CV_64F);
+cv::Mat tvec = cv::Mat::zeros(3, 1, CV_64F);
 
 /*********************************************************************
  * Main entrypoint of the program
@@ -161,12 +190,22 @@ int main(int argc, char** argv)
 	
 	// gui for the visualization
 	cv::namedWindow( "image", CV_WINDOW_AUTOSIZE );
+	cv::namedWindow( "orig", CV_WINDOW_AUTOSIZE );
+	
+	// camera settings
+	intrinsic << 525, 0.0, 319.5, 0.0, 525, 239.5, 0.0, 0.0, 1.0; // Kinect RGB camera intrinsics
 	
 	// initialize tracker
 	initTracker();
  	
 	// start callback for the camera images
 	openniGrabber->start();
+	
+	// trackbars
+	cv::namedWindow("trackbars",CV_WINDOW_KEEPRATIO);
+	cv::createTrackbar("Max camera distance [cm]","trackbars", &max_camera_distance, 400);
+	cv::createTrackbar("Mean_shift radius [cm]","trackbars", &mean_shift_radius, 100);
+	
 
 	while(!stopCamera)
 	{
@@ -214,7 +253,20 @@ void grabberCallback(const PointCloud<PointXYZRGBA>::ConstPtr& cloud)
 	DEBUG(2, cout << "Callback..." << endl);
 	// copy to the pcl for write-access
 	pcl::copyPointCloud<pcl::PointXYZRGBA, pcl::PointXYZRGB>(*cloud, *mycloud);
-	removeBackground(mycloud);
+	
+	if(!init_camera)
+	{
+		 calculateCameraSettings(mycloud);
+	}
+	
+	convertImage(*mycloud, image);
+    	image.copyTo(im_draw);
+	cv::imshow("orig",im_draw);
+	
+	pcl::PointCloud<pcl::PointXYZRGB>::Ptr result_cluster (new pcl::PointCloud<pcl::PointXYZRGB>);
+	removeBackground(mycloud, result_cluster);
+	std::vector<cv::Point2f> projectedPoints;
+	cv::projectPoints(mean_shift_points, rvec, tvec, intrinsic, distCoeffs, projectedPoints);
 	
 	int key= cv::waitKey(100);
 	if (mode == capture)
@@ -222,9 +274,20 @@ void grabberCallback(const PointCloud<PointXYZRGBA>::ConstPtr& cloud)
 		DEBUG(2, cout << "Mode Capture" << endl);
 		
 		// Print the current view of the camera
-		convertImage(*mycloud, image);
+		convertImage(*result_cluster, image, mycloud->width, mycloud->height);
 	    	image.copyTo(im_draw);
+	    	
+	    	std::sort(projectedPoints.begin(), projectedPoints.end(), lexico_compare);
+    		projectedPoints.erase(std::unique(projectedPoints.begin(), projectedPoints.end(), points_are_equal), projectedPoints.end());
+	    	
+	    	cout << "Mean Shift Particles: " << num_particles << " | current particles: " << projectedPoints.size() << endl;
+	    	// draw mean shift circles
+	    	for(int i = 0; i < projectedPoints.size(); i++)
+	    		cv::circle(im_draw, projectedPoints[i], 30, cv::Scalar( 255, 0, 0 ), 10);
+	    	
 		cv::imshow("image",im_draw);
+		
+		
 		
 	
 		// if user hits 'space'
@@ -271,28 +334,381 @@ void grabberCallback(const PointCloud<PointXYZRGBA>::ConstPtr& cloud)
 			cout << "Saved " << filename << "." << endl;
 		}
 		else PCL_ERROR("Problem saving %s.\n", filename.c_str());
+		convertImage(*mycloud, image);
+		imwrite( filename + ".jpg", image );
 	}
+}
+
+
+/*********************************************************************
+ * Calculate the Transformation Matrix for projecting 3D Points to 2D Points
+ ********************************************************************/
+void calculateCameraSettings(PointCloud<PointXYZRGB>::Ptr& cloud)
+{
+	std::vector<cv::Point2d> imagePoints;
+  	std::vector<cv::Point3f> objectPoints;
+  	
+
+	for (unsigned v = 0; v < cloud->height; v++)
+	{
+		for (unsigned u = 0; u < cloud->width; u++)
+		{
+			const pcl::PointXYZRGB &pt = (*cloud)(u,v);
+			if (pt.z != pt.z || pt.x != pt.x || pt.y != pt.y)
+			{
+				continue;
+			}
+			imagePoints.push_back(cv::Point2d(u, v));
+			objectPoints.push_back(cv::Point3f(pt.x, pt.y, pt.z));
+		}
+	}
+	
+		
+	if(solvePnP(objectPoints, imagePoints, intrinsic, distCoeffs, rvec, tvec) )
+	{
+		DEBUG(1, cout << "Translation matrix calculated" << endl);
+		init_camera = true;
+	}
+	
 }
 
 /*********************************************************************
  * This function removes the background of the image
  ********************************************************************/
-void removeBackground(PointCloud<PointXYZRGB>::Ptr& cloud)
+void removeBackground(PointCloud<PointXYZRGB>::Ptr& cloud, PointCloud<PointXYZRGB>::Ptr& cloud_result)
 {
+	
+	 // Create 2nd Pointcloud for manipulation
+	  pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_f (new pcl::PointCloud<pcl::PointXYZRGB>);
+	  pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_filtered (new pcl::PointCloud<pcl::PointXYZRGB>);
+	  
+	  // Remove NaN points from the cloud
+	  std::vector<int> indices;
+	  pcl::removeNaNFromPointCloud(*cloud, *cloud_filtered, indices);
+
+	  // Create the filtering object: downsample the dataset using a leaf size of 1cm
+	  pcl::VoxelGrid<pcl::PointXYZRGB> vg;
+	  
+	  vg.setInputCloud (cloud_filtered);
+	  vg.setLeafSize (0.04f, 0.04f, 0.04f);
+	  vg.filter (*cloud_filtered);
+	  std::cout << "PointCloud after filtering has: " << cloud_filtered->points.size ()  << " data points." << std::endl; //*
+	  
+	  
+
+	  // Create the segmentation object for the planar model and set all the parameters
+	  pcl::SACSegmentation<pcl::PointXYZRGB> seg;
+	  pcl::PointIndices::Ptr inliers (new pcl::PointIndices);
+	  pcl::ModelCoefficients::Ptr coefficients (new pcl::ModelCoefficients);
+	  pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_plane (new pcl::PointCloud<pcl::PointXYZRGB> ());
+	  pcl::PCDWriter writer;
+	  seg.setOptimizeCoefficients (true);
+	  seg.setModelType (pcl::SACMODEL_PLANE);
+	  seg.setMethodType (pcl::SAC_RANSAC);
+	  seg.setMaxIterations (100);
+	  seg.setDistanceThreshold (0.02);
+
+	  int i=0, nr_points = (int) cloud_filtered->points.size ();
+	  while (false && cloud_filtered->points.size () > 0.3 * nr_points)
+	  {
+	    // Segment the largest planar component from the remaining cloud
+	    seg.setInputCloud (cloud_filtered);
+	    seg.segment (*inliers, *coefficients);
+	    if (inliers->indices.size () == 0)
+	    {
+	      std::cout << "Could not estimate a planar model for the given dataset." << std::endl;
+	      break;
+	    }
+
+	    // Extract the planar inliers from the input cloud
+	    pcl::ExtractIndices<pcl::PointXYZRGB> extract;
+	    extract.setInputCloud (cloud_filtered);
+	    extract.setIndices (inliers);
+	    extract.setNegative (false);
+
+	    // Get the points associated with the planar surface
+	    extract.filter (*cloud_plane);
+	    std::cout << "PointCloud representing the planar component: " << cloud_plane->points.size () << " data points." << std::endl;
+
+	    // Remove the planar inliers, extract the rest
+	    extract.setNegative (true);
+	    extract.filter (*cloud_f);
+	    *cloud_filtered = *cloud_f;
+	  }
+
+	  // Creating the KdTree object for the search method of the extraction
+	  pcl::search::KdTree<pcl::PointXYZRGB>::Ptr tree (new pcl::search::KdTree<pcl::PointXYZRGB>);
+	  tree->setInputCloud (cloud_filtered);
+
+	  std::vector<pcl::PointIndices> cluster_indices;
+	  pcl::EuclideanClusterExtraction<pcl::PointXYZRGB> ec;
+	  ec.setClusterTolerance (0.15); // 5cm
+	  ec.setMinClusterSize (100);
+	  ec.setMaxClusterSize (2500000);
+	  ec.setSearchMethod (tree);
+	  ec.setInputCloud (cloud_filtered);
+	  ec.extract (cluster_indices);
+
+	  pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud_cluster_all (new pcl::PointCloud<pcl::PointXYZRGB>);
+	  int j = 0;
+	  
+	  vector < pcl::PointCloud<pcl::PointXYZRGB>, Eigen::aligned_allocator <pcl::PointCloud <pcl::PointXYZRGB> > > cloud_clusters;
+	  
+	  /* initialize random seed: */
+	  srand (time(NULL));
+	  
+	  for (std::vector<pcl::PointIndices>::const_iterator it = cluster_indices.begin (); it != cluster_indices.end (); ++it)
+	  {
+	    int r = rand() % 255;
+	    int g = rand() % 255;
+	    int b = rand() % 255;
+	    pcl::PointCloud<pcl::PointXYZRGB>::Ptr mycluster (new pcl::PointCloud<pcl::PointXYZRGB>);
+	    for (std::vector<int>::const_iterator pit = it->indices.begin (); pit != it->indices.end (); ++pit)
+	    {
+	      mycluster->points.push_back(cloud_filtered->points[*pit]);
+	      cloud_filtered->points[*pit].r=r;
+	      cloud_filtered->points[*pit].g=g;
+	      cloud_filtered->points[*pit].b=b;
+	      cloud_cluster_all->points.push_back (cloud_filtered->points[*pit]);
+	    }
+	    mycluster->width = mycluster->points.size();
+	    mycluster->height = 1;
+	    mycluster->is_dense = true;
+	    cloud_clusters.push_back(*mycluster);
+	    
+	    j++;
+	  }
+	  
+	    cloud_cluster_all->width = cloud_cluster_all->points.size ();
+	    cloud_cluster_all->height = 1;
+	    cloud_cluster_all->is_dense = true;
+	    
+	    Eigen::Matrix<float, 4, 1 > center;
+	    double min_dist = DBL_MAX;
+	    int result_cluster_index = 0;
+	    
+	    for(int i = 0; i < cloud_clusters.size(); i++)
+	    {
+	    	pcl::compute3DCentroid	(cloud_clusters[i] , center);
+	    	/*
+	    	unsigned int pcl::compute3DCentroid	(	const pcl::PointCloud< PointT > & 	cloud,
+								const pcl::PointIndices & 	indices,
+								Eigen::Matrix< Scalar, 4, 1 > & 	centroid 
+							)	
+		*/
+		double dist = sqrt(pow(center[0],2) + pow(center[1],2) + pow(center[2],2));
+	    	DEBUG(2, cout << "Center" << i << ": " << dist << endl);
+	    	if (dist < min_dist)
+	    	{
+	    		min_dist = dist;
+	    		result_cluster_index = i;
+	    	}	
+	    }
+
+	
+	 
+
+	if (cloud_cluster_all->points.size () > 0)
+	{
+		
+		for(int i = 0; i <  cloud_clusters[result_cluster_index].points.size(); i++)
+		{
+			cloud_result->points.push_back(cloud_clusters[result_cluster_index].points[i]);
+		}
+		
+		cloud_result->width = cloud_result->points.size ();
+	    	cloud_result->height = 1;
+	    	cloud_result->is_dense = true;
+		
+		/*
+		std::stringstream ss;
+		ss << "./clusters/clusterall_" << filesSaved << "_" << cluster_indices.size() << ".pcd";
+	    	writer.write<pcl::PointXYZRGB> (ss.str (), *cloud_cluster_all, false);
+		ss.str("");
+		ss << "./clusters/cluster_" << filesSaved << ".pcd";
+	    	writer.write<pcl::PointXYZRGB> (ss.str (), cloud_clusters[result_cluster_index], false);
+	    	filesSaved++;*/
+	}
+
+	
 	BOOST_FOREACH (pcl::PointXYZRGB& pt, cloud->points)
 	{
-		if(pt.z > 1)
+		if (pt.z != pt.z || pt.x != pt.x || pt.y != pt.y)
+		{
+			pt.r = 0;
+			pt.g = 0;
+			pt.b = 0;
+		
+		}
+		/*	
+		if(pt.z > float(max_camera_distance) / 100)
 		{
 			pt.x = bad_point;
 			pt.y = bad_point;
 			pt.z = bad_point;
-			pt.r = 255;
-			pt.g = 255;
-			pt.b = 255;
-		}
+			pt.r = 0;
+			pt.g = 0;
+			pt.b = 0;
+		}*/
 		//printf ("\t(%f, %f, %f, %d, %d, %d)\n", pt.x, pt.y, pt.z, pt.r, pt.g, pt.b);
 		
-	}   		
+	}
+	
+	
+	clock_t start, end;
+	start = clock();
+
+
+	// initialize 10 points for mean shift
+	
+	srand (time(NULL));
+	mean_shift_points.clear();
+	if(cloud_result->points.size() > 0)
+	{
+		while(mean_shift_points.size() < num_particles)
+		{
+			pcl::PointXYZRGB& pt = cloud_result->points[rand() % cloud_result->points.size()];
+			if(pt.r > 0)
+			{
+				mean_shift_points.push_back(cv::Point3f(pt.x, pt.y, pt.z));
+			}
+		}
+	}
+	
+	for(int i = 0; i < mean_shift_points.size(); i++)
+	{
+		calcMeanShift(mean_shift_points[i],  cloud_result, (float)mean_shift_radius / 100);
+	}
+	
+	end = clock();
+
+	cout << "Time required for execution: "<< (double)(end-start)/CLOCKS_PER_SEC << " seconds." << "\n\n";
+}
+
+// Calc mean shift
+void calcMeanShift(cv::Point3f &p, PointCloud<PointXYZRGB>::Ptr& cloud, float radius)
+{
+	cv::Point3f center (0,0,0);
+	do
+	{
+		center = p;
+		pcl::PointCloud<pcl::PointXYZRGB>::Ptr myRegion (new pcl::PointCloud<pcl::PointXYZRGB>);
+		
+		BOOST_FOREACH (pcl::PointXYZRGB& pt, cloud->points)
+		{
+			
+			float dist = sqrt(pow(pt.x - p.x, 2) + pow(pt.y - p.y, 2) + pow(pt.z - p.z, 2));
+			
+			if(dist < radius)
+				myRegion->push_back(pt);
+		
+		}
+		
+		myRegion->width = myRegion->points.size ();
+	    	myRegion->height = 1;
+	    	myRegion->is_dense = true;
+	    	Eigen::Matrix<float, 4, 1 > tmp;
+	    	pcl::compute3DCentroid(*myRegion , tmp);
+	    	p.x = tmp[0];
+	    	p.y = tmp[1];
+	    	p.z = tmp[2];
+	} while(p != center);
+	
+}
+
+/*********************************************************************
+ * This function removes the hand from the image
+ ********************************************************************/
+void postProcessing(PointCloud<PointXYZRGB>::Ptr& cloud)
+{
+	pcl::search::Search <pcl::PointXYZRGB>::Ptr tree = boost::shared_ptr<pcl::search::Search<pcl::PointXYZRGB> > (new pcl::search::KdTree<pcl::PointXYZRGB>);
+	pcl::IndicesPtr indices (new std::vector <int>);
+	pcl::PassThrough<pcl::PointXYZRGB> pass;
+	pass.setInputCloud (cloud);
+	pass.setFilterFieldName ("z");
+	pass.setFilterLimits (0.0, 1.0);
+	pass.filter (*indices);
+
+	pcl::RegionGrowingRGB<pcl::PointXYZRGB> reg;
+	reg.setInputCloud (cloud);
+	reg.setIndices (indices);
+	reg.setSearchMethod (tree);
+	reg.setDistanceThreshold (8);
+	reg.setPointColorThreshold (6);
+	reg.setRegionColorThreshold (5);
+	reg.setMinClusterSize (300);
+
+	std::vector <pcl::PointIndices> clusters;
+	std::vector <pcl::PointIndices> del_clusters;
+	reg.extract (clusters);
+
+	DEBUG(2, std::cout << "Extracted clusters" << std::endl);
+
+	uint8_t min_r = 72;
+	uint8_t min_g = 60;
+	uint8_t min_b = 30;
+
+	uint8_t max_r = 138;
+	uint8_t max_g = 110;
+	uint8_t max_b = 99;
+
+
+	std::vector<int> del_cluster;
+	for(int i = 0; i < clusters.size(); i++)
+	{
+		std::vector<uint8_t> r;
+		std::vector<uint8_t> g;
+		std::vector<uint8_t> b;
+
+		for (int counter = 0; counter < clusters[i].indices.size(); counter++)
+		{
+			int index = clusters[i].indices[counter];
+			r.push_back(cloud->points[index].r);
+			g.push_back(cloud->points[index].g);
+			b.push_back(cloud->points[index].b);
+	
+		}
+
+		std::sort(r.begin(), r.end());
+		std::sort(g.begin(), g.end());
+		std::sort(b.begin(), b.end());
+
+		uint8_t med_r = r[r.size()/2];
+		uint8_t med_g = g[r.size()/2];
+		uint8_t med_b = b[r.size()/2];
+
+		DEBUG(1, cout << "Found Cluster: " << int(med_r) << "|" << int(med_g) << "|" << int (med_b) << endl);
+
+		if (min_r <= med_r && med_r <= max_r && 
+		    min_g <= med_g && med_g <= max_g && 
+		    min_b <= med_b && med_b <= max_b   )
+		{
+			del_cluster.push_back(i);
+			del_clusters.push_back(clusters[i]);
+			DEBUG(2, cout << "Del Cluster: " << int(med_r) << "|" << int(med_g) << "|" << int (med_b) << endl);
+		} 
+	}
+	
+	pcl::PointCloud <pcl::PointXYZRGB>::Ptr colored_cloud = reg.getColoredCloud ();
+	io::savePCDFile("cloud_col.pcd", *colored_cloud, true);
+
+	for (int i = 0; i < del_cluster.size(); i++)
+	{
+		// Extract the hand  from the input cloud
+		pcl::ExtractIndices<pcl::PointXYZRGB> extract;
+		extract.setInputCloud (cloud);
+		pcl::PointIndices tmp = clusters[del_cluster[i]];
+		 pcl::PointIndices::Ptr inliers = boost::make_shared<pcl::PointIndices>(tmp);
+		extract.setIndices (inliers);
+		extract.setNegative (true);
+
+		// Get the points associated with the planar surface
+		extract.filter (*cloud);
+	}	
+	
+	
+	 
+
 }
 
 
@@ -363,14 +779,8 @@ void initTracker()
 	cnt_time = 0;
 	lost_pose_counter = 0;
 
-	intrinsic(0,0)=intrinsic(1,1)=525;
-	intrinsic(0,2)=320, intrinsic(1,2)=240;
-
 	// configure camera tracking, temporal smothing and mapping
 	tsf.setCameraParameter(intrinsic);
-	intrinsic.copyTo(intrinsic_tsf);
-	intrinsic_tsf(0,0) = intrinsic_tsf(1,1) = 840;
-	intrinsic_tsf(0,2) = 512; intrinsic_tsf(1,2) = 384;
 	tsf.setCameraParameterTSF(intrinsic, 640, 480);
 
 	v4r::TSFVisualSLAM::Parameter param;
@@ -423,8 +833,11 @@ void stopTracker()
 
 	gfilt.setCameraParameter(intrinsic_opti, dist_coeffs_opti);
 	gfilt.getGlobalCloudFiltered(tsf.getMap(), *glob_cloud);
+	
+	pcl::copyPointCloud<pcl::PointXYZRGBNormal, pcl::PointXYZRGB>(*glob_cloud, *mycloud);
+	postProcessing(mycloud);
 
-	if (file_cloud.size()>0) pcl::io::savePCDFileBinary(file_cloud, *glob_cloud);
+	if (file_cloud.size()>0) pcl::io::savePCDFileBinary(file_cloud, *mycloud);
 
 	cout<<"Creat mesh..."<<endl;
 	gfilt.getMesh(glob_cloud, mesh);
@@ -453,6 +866,54 @@ void convertImage(const pcl::PointCloud<pcl::PointXYZRGB> &_cloud, cv::Mat &_ima
       cv_pt[0] = pt.b;
     }
   }
+}
+
+/*********************************************************************
+ * This function converts a cloud image to an cv::Mat
+ ********************************************************************/
+void convertImage(const pcl::PointCloud<pcl::PointXYZRGB> &cloud, cv::Mat &_image, int width, int height)
+{
+  	_image = cv::Mat_<cv::Vec3b>(height, width);
+  	
+  	for (unsigned v = 0; v < height; v++)
+	{
+		for (unsigned u = 0; u < width; u++)
+		{
+			cv::Vec3b &cv_pt = _image.at<cv::Vec3b> (v, u);
+
+			cv_pt[2] = 255;
+			cv_pt[1] = 255;
+			cv_pt[0] = 255;
+		}
+	}
+  	
+  	
+  	std::vector<cv::Point3f> objectPoints;
+  	std::vector<cv::Vec3b> rgbPoints;
+  	
+	for (unsigned i = 0; i < cloud.points.size(); i++)
+	{
+		const pcl::PointXYZRGB &pt = cloud.points[i];
+		if (pt.z != pt.z || pt.x != pt.x || pt.y != pt.y)
+		{
+			continue;
+		}
+		objectPoints.push_back(cv::Point3f(pt.x, pt.y, pt.z));
+		rgbPoints.push_back(cv::Vec3b(pt.r, pt.g, pt.b));
+	}
+	
+	std::vector<cv::Point2f> projectedPoints;
+	cv::projectPoints(objectPoints, rvec, tvec, intrinsic, distCoeffs, projectedPoints);
+	
+	for(unsigned i = 0; i < projectedPoints.size(); i++)
+	{
+		
+		cv::circle(_image, projectedPoints[i], 8, cv::Scalar( rgbPoints[i][2], rgbPoints[i][1], rgbPoints[i][0] ), -1);
+		//cv::Vec3b &cv_pt = _image.at<cv::Vec3b> ((int)round(projectedPoints[i].y), (int)round(projectedPoints[i].x));
+		//cv_pt[2] = rgbPoints[i][0];
+		//cv_pt[1] = rgbPoints[i][1];
+		//cv_pt[0] = rgbPoints[i][2];
+	}
 }
 
 
@@ -559,6 +1020,20 @@ void drawConfidenceBar(cv::Mat &im, const double &conf, int x_start, int x_end, 
   }
 }
 
+
+// Lexicographic compare, same as for ordering words in a dictionnary:
+// test first 'letter of the word' (x coordinate), if same, test 
+// second 'letter' (y coordinate).
+bool lexico_compare(const cv::Point2f& p1, const cv::Point2f& p2) {
+    if(p1.x < p2.x) { return true; }
+    if(p1.x > p2.x) { return false; }
+    return (p1.y < p2.y);
+}
+
+
+ bool points_are_equal(const cv::Point2f& p1, const cv::Point2f& p2) {
+   return ((p1.x == p2.x) && (p1.y == p2.y));
+ }
 
 
 
