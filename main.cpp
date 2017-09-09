@@ -38,6 +38,7 @@
 #include <utility>                   // for std::pair
 #include <algorithm>                 // for std::for_each
 #include <boost/graph/graph_traits.hpp>
+#include <boost/graph/astar_search.hpp>
 #include <boost/graph/adjacency_list.hpp>
 #include <boost/graph/dijkstra_shortest_paths.hpp>
 #include <pcl/kdtree/kdtree_flann.h>
@@ -73,6 +74,13 @@
 using namespace std;
 using namespace pcl;
 
+/* */
+
+typedef boost::property<boost::edge_weight_t, int> EdgeWeightProperty;
+typedef boost::adjacency_list<boost::listS, boost::vecS,boost::undirectedS,boost::no_property,EdgeWeightProperty> UndirectedGraph;
+typedef boost::graph_traits<UndirectedGraph>::edge_iterator edge_iterator;
+
+/* */
 
 /* ######################### Macros ############################### */
 #if DEBUG_LEVEL == 2  
@@ -97,7 +105,7 @@ void calcMeanShift(cv::Point3f &p, PointCloud<PointXYZRGB>::Ptr&, float radius);
 cv::Point3f getCenterPoint(std::vector<cv::Point3f> points);
 cv::Point3f getClusterPoint(std::vector<cv::Point3f> points);
 void removeHand(PointCloud<PointXYZRGB>::Ptr&, cv::Point3f roi_center, PointCloud<PointXYZRGB>::Ptr&); 
-std::vector<int> getKNearestNeigbours(PointCloud<PointXYZRGB>::Ptr&, int K, cv::Point3f p); // get k nearest neighbours and returns their index
+std::vector<int> getKNearestNeigbours(pcl::KdTreeFLANN<pcl::PointXYZRGB> kdtree, int K, cv::Point3f p); // get k nearest neighbours and returns their index
 std::vector<int> getShortestPath(PointCloud<PointXYZRGB>::Ptr&, cv::Point3f start, cv::Point3f end, float maxDist); // maxDist=maximum distance between 2 neighbours
 
 void convertImage(const pcl::PointCloud<pcl::PointXYZRGB> &cloud, cv::Mat &image);
@@ -217,7 +225,7 @@ int main(int argc, char** argv)
 	// gui for the visualization
 	cv::namedWindow( "image", CV_WINDOW_AUTOSIZE );
 	cv::namedWindow( "orig", CV_WINDOW_AUTOSIZE );
-	cv::namedWindow( "debug", CV_WINDOW_AUTOSIZE );
+	
 	
 	// camera settings
 	intrinsic << 525, 0.0, 319.5, 0.0, 525, 239.5, 0.0, 0.0, 1.0; // Kinect RGB camera intrinsics
@@ -413,25 +421,26 @@ void grabberCallback(const PointCloud<PointXYZRGBA>::ConstPtr& cloud)
 	    		cout << "Start remove hand" << endl;
 			//removeHand(result_cluster, roi_center, roi);
 			//removeHand(mycloud, roi_center, roi);
-			std::vector<int> path = getShortestPath(mycloud, center, roi_center, 0.1);
-			
-			convertImage(*mycloud, image, mycloud->width, mycloud->height, 1);
+			std::vector<int> path = getShortestPath(result_cluster, roi_center, center, 0.05);
 	    		
-			
-			BOOST_FOREACH(int i, path)
+	    		// draw path
+	    		convertImage(*mycloud, image, mycloud->width, mycloud->height, 8);
+			image.copyTo(im_draw);
+	    		roi_center = getClusterPoint(roiPoints);
+	    		drawCircle(im_draw, roi_center, 40, cv::Scalar( 0, 255, 255 ), 4);
+	    		drawCircle(im_draw, center, 40, cv::Scalar( 0, 255, 255 ), 4);
+	    		BOOST_FOREACH(int i, path)
 			{
 				cv::Point3f p;
-				p.x = mycloud->points[i].x;
-				p.x = mycloud->points[i].y;
-				p.x = mycloud->points[i].z;
-				drawCircle(im_draw, p, 10, cv::Scalar( 0, 255, 255 ), 4);
+				p.x = result_cluster->points[i].x;
+				p.y = result_cluster->points[i].y;
+				p.z = result_cluster->points[i].z;
+				drawCircle(im_draw, p, 10, cv::Scalar( 0, 0, 255 ), 4);
 			}
+	    		
+	    		cv::imshow("path",im_draw);
+			cv::namedWindow( "path", CV_WINDOW_AUTOSIZE );
 			
-			image.copyTo(im_draw);
-	    		cv::namedWindow( "roi", CV_WINDOW_AUTOSIZE );
-	    		cv::imshow("roi",im_draw);
-			
-			// draw path
 			end = clock();
 			cout << "Time required for remove hand: "<< (double)(end-start)/CLOCKS_PER_SEC << " seconds." << "\n\n";
 	    		
@@ -892,17 +901,13 @@ cv::Point3f getClusterPoint(std::vector<cv::Point3f> points)
 	return result;
 }
 
-std::vector<int> getKNearestNeigbours(PointCloud<PointXYZRGB>::Ptr& cloud, int K, cv::Point3f p)
+std::vector<int> getKNearestNeigbours(pcl::KdTreeFLANN<pcl::PointXYZRGB> kdtree, int K, cv::Point3f p)
 {
-	pcl::KdTreeFLANN<pcl::PointXYZRGB> kdtree;
-
-	kdtree.setInputCloud (cloud);
-
 	pcl::PointXYZRGB searchPoint;
 
 	searchPoint.x = p.x;
 	searchPoint.y = p.y;
-	searchPoint.z = p.y;
+	searchPoint.z = p.z;
 
 	// K nearest neighbor search
 
@@ -911,6 +916,27 @@ std::vector<int> getKNearestNeigbours(PointCloud<PointXYZRGB>::Ptr& cloud, int K
 
 	
 	kdtree.nearestKSearch (searchPoint, K, pointIdxNKNSearch, pointNKNSquaredDistance);
+	
+	return pointIdxNKNSearch;
+}
+
+std::vector<int> getNearestNeigboursInRadius(pcl::KdTreeFLANN<pcl::PointXYZRGB> kdtree, float radius, cv::Point3f p)
+{
+	pcl::PointXYZRGB searchPoint;
+
+	searchPoint.x = p.x;
+	searchPoint.y = p.y;
+	searchPoint.z = p.z;
+
+	// K nearest neighbor search
+
+	std::vector<int> pointIdxNKNSearch;
+	std::vector<float> pointNKNSquaredDistance;
+
+	
+	kdtree.radiusSearch (searchPoint, radius, pointIdxNKNSearch, pointNKNSquaredDistance);
+	
+	
 	
 	return pointIdxNKNSearch;
 }
@@ -926,6 +952,7 @@ class Node {
   
     void init(PointXYZRGB p, int index, int pred_index);
     float calcDistance(Node n);
+    cv::Point3f toPoint();
     
     bool operator < (const Node& n) const
     {
@@ -940,6 +967,15 @@ class Node {
 
 float Node::calcDistance (Node n) {
   return sqrt( pow(x-n.x, 2) + pow(y-n.y, 2) + pow(z-n.z, 2) );
+}
+
+cv::Point3f Node::toPoint()
+{
+	cv::Point3f p;
+	p.x = x;
+	p.y = y;
+	p.z = z;
+	return p;
 }
 
 void Node::init(PointXYZRGB p, int index, int pred_index)
@@ -1025,9 +1061,13 @@ std::vector<int> getNeigbours(PointCloud<PointXYZRGB>::Ptr& cloud, Node n)
 
 std::vector<int> getShortestPath(PointCloud<PointXYZRGB>::Ptr& cloud, cv::Point3f start, cv::Point3f end, float maxDist)
 {
+	pcl::KdTreeFLANN<pcl::PointXYZRGB> kdtree;
+
+	kdtree.setInputCloud (cloud);
+	
 	// get start point
-	std::vector<int> vstart = getKNearestNeigbours(cloud, 1, start);
-	std::vector<int> vend = getKNearestNeigbours(cloud, 1, end);
+	std::vector<int> vstart = getKNearestNeigbours(kdtree, 1, start);
+	std::vector<int> vend = getKNearestNeigbours(kdtree, 1, end);
 	
 	std::vector<int> result;
 	
@@ -1040,6 +1080,12 @@ std::vector<int> getShortestPath(PointCloud<PointXYZRGB>::Ptr& cloud, cv::Point3
 	PointXYZRGB p1 = cloud->points[vstart[0]];
 	PointXYZRGB p2 = cloud->points[vend[0]];
 	
+	
+	
+	
+	
+	
+	// old version
 	std::vector<Node> openSet;
 	std::vector<Node> closedSet;
 	
@@ -1060,14 +1106,24 @@ std::vector<int> getShortestPath(PointCloud<PointXYZRGB>::Ptr& cloud, cv::Point3
 	openSet.push_back(s);
 	
 	
+	/*convertImage(*cloud, image, mycloud->width, mycloud->height, 8);
+	image.copyTo(im_draw);
+	drawCircle(im_draw, s.toPoint(), 40, cv::Scalar( 0, 255, 0 ), 4);
+	drawCircle(im_draw, e.toPoint(), 40, cv::Scalar( 0, 255, 255 ), 4);
+	
+	
+	cv::imshow("path",im_draw);
+	cv::namedWindow( "path", CV_WINDOW_AUTOSIZE );*/
+	
 	bool found = false;
 	while(openSet.size() > 0)
 	{
-	
-		cout << "OpenSet.size() = " << openSet.size() << endl;
+		//cout << "OpenSet.size() = " << openSet.size() << endl;
 		int min_index = getMinNodeIndex(openSet);
 		Node min = openSet[min_index];
-		
+		//drawCircle(im_draw, min.toPoint(), 10, cv::Scalar( 0, 0, 255 ), 4);
+		//cv::imshow("path",im_draw);
+		//cv::waitKey(0);
 		if(min == e)
 		{
 			e.pcl_pred_index = min.pcl_pred_index;
@@ -1076,11 +1132,18 @@ std::vector<int> getShortestPath(PointCloud<PointXYZRGB>::Ptr& cloud, cv::Point3
 		}
 		
 		closedSet.push_back(min);
-		std::sort (closedSet.begin(), closedSet.begin());
+		std::sort (closedSet.begin(), closedSet.end());
 		openSet.erase(openSet.begin() + min_index);
+		cv::Point3f current;
+		current.x = min.x;
+		current.y = min.y;
+		current.z = min.z;
+		cout << "Current: " << current << endl;
+		std::vector<int> neighbours_index = getNearestNeigboursInRadius(kdtree, maxDist, current);
+		//std::vector<int> neighbours_index = getKNearestNeigbours(kdtree, 9, current);
+		cout << "Found neighbours:" << neighbours_index.size() << endl;
 		
-		std::vector<int> neighbours_index = getNeigbours(cloud, min);
-		
+
 		BOOST_FOREACH(int i, neighbours_index)
 		{
 			PointXYZRGB p = cloud->points[i];
@@ -1088,12 +1151,15 @@ std::vector<int> getShortestPath(PointCloud<PointXYZRGB>::Ptr& cloud, cv::Point3
 			node_neighbour.init(p, i, min.pcl_index);
 			float dist = min.calcDistance(node_neighbour);
 			
+			//drawCircle(im_draw, node_neighbour.toPoint(), 10, cv::Scalar( 255, 0, 0 ), 4);
+			
 			if (dist > maxDist)
 				continue;
 			
-			if(std::binary_search (closedSet.begin(), closedSet.end(), node_neighbour))
+			if (std::find(closedSet.begin(), closedSet.end(), node_neighbour) != closedSet.end())
+			{
 				continue;
-			
+			}
 			
 			float gscore = min.gscore +  dist;
 			
@@ -1105,14 +1171,12 @@ std::vector<int> getShortestPath(PointCloud<PointXYZRGB>::Ptr& cloud, cv::Point3
 			node_neighbour.gscore = gscore;
 			node_neighbour.fscore = gscore + node_neighbour.calcDistance(e);
 			
-			cout << "Current gscore: " << node_neighbour.gscore << "| fscore: " << node_neighbour.fscore << endl;
-			
 			
 			// discoverd new node
-			if(!std::binary_search (openSet.begin(), openSet.end(), node_neighbour))
+			if(std::find(openSet.begin(), openSet.end(), node_neighbour) == openSet.end())
 			{
 				openSet.push_back(node_neighbour);
-				std::sort (openSet.begin(), openSet.begin());
+				std::sort (openSet.begin(), openSet.end());
 			}
 		}
 		
@@ -1122,6 +1186,7 @@ std::vector<int> getShortestPath(PointCloud<PointXYZRGB>::Ptr& cloud, cv::Point3
 	if (found)
 	{
 		int index = e.pcl_pred_index;
+		cout << "Index " << e.pcl_pred_index << endl;
 		
 		while(index >= 0)
 		{
@@ -1144,6 +1209,16 @@ std::vector<int> getShortestPath(PointCloud<PointXYZRGB>::Ptr& cloud, cv::Point3
 				cout << "A* Search error: Not not found " << index << endl;
 			}
 		
+		}
+	}
+	else
+	{
+		cout << "No path found" << endl;
+		
+		BOOST_FOREACH(Node n, closedSet)
+		{
+			if(n.pcl_index >= 0)
+				result.push_back(n.pcl_index);
 		}
 	}
 	cout << "FOUND PATH: " << result.size() << endl;
