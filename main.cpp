@@ -106,6 +106,7 @@ cv::Point3f getCenterPoint(std::vector<cv::Point3f> points);
 cv::Point3f getClusterPoint(std::vector<cv::Point3f> points);
 void removeHand(PointCloud<PointXYZRGB>::Ptr&, cv::Point3f roi_center, PointCloud<PointXYZRGB>::Ptr&); 
 std::vector<int> getKNearestNeigbours(pcl::KdTreeFLANN<pcl::PointXYZRGB> kdtree, int K, cv::Point3f p); // get k nearest neighbours and returns their index
+std::vector<int> getNearestNeigboursInRadius(pcl::KdTreeFLANN<pcl::PointXYZRGB> kdtree, float radius, cv::Point3f p);
 std::vector<int> getShortestPath(PointCloud<PointXYZRGB>::Ptr&, cv::Point3f start, cv::Point3f end, float maxDist); // maxDist=maximum distance between 2 neighbours
 
 void convertImage(const pcl::PointCloud<pcl::PointXYZRGB> &cloud, cv::Mat &image);
@@ -172,7 +173,7 @@ cv::Mat_<double> dist_coeffs_opti = cv::Mat::zeros(4, 1, CV_64F);
 cv::Mat_<double> intrinsic_opti = cv::Mat_<double>::eye(3,3);
 
 Eigen::Matrix4f pose;
-float voxel_size = 0.005;//0.0005;
+float voxel_size = 0.0005;//0.0005;
 double thr_weight = 2;      //e.g. 10    // surfel threshold for the final model
 double thr_delta_angle = 80; // e.g. 80
 int poisson_depth = 6;
@@ -407,28 +408,16 @@ void grabberCallback(const PointCloud<PointXYZRGBA>::ConstPtr& cloud)
 		
 		if(cnt_calibration_frames >= num_calibration_frames)
 		{
-			convertImage(*result_cluster, image, mycloud->width, mycloud->height, 8);
-			image.copyTo(im_draw);
-	    		roi_center = getClusterPoint(roiPoints);
-	    		drawCircle(im_draw, roi_center, 40, cv::Scalar( 0, 255, 255 ), 4);
-	    		cv::imshow("image",im_draw);
-	    		pcl::PointCloud<pcl::PointXYZRGB>::Ptr roi (new pcl::PointCloud<pcl::PointXYZRGB>);
-	    		
-	    		
-
-	    		// remove hand
+	    		// get path
 	    		start = clock();
-	    		cout << "Start remove hand" << endl;
-			//removeHand(result_cluster, roi_center, roi);
-			//removeHand(mycloud, roi_center, roi);
+	    		cout << "Start calculating path" << endl;
 			std::vector<int> path = getShortestPath(result_cluster, roi_center, center, 0.05);
 	    		
 	    		// draw path
 	    		convertImage(*mycloud, image, mycloud->width, mycloud->height, 8);
 			image.copyTo(im_draw);
 	    		roi_center = getClusterPoint(roiPoints);
-	    		drawCircle(im_draw, roi_center, 40, cv::Scalar( 0, 255, 255 ), 4);
-	    		drawCircle(im_draw, center, 40, cv::Scalar( 0, 255, 255 ), 4);
+	    		
 	    		BOOST_FOREACH(int i, path)
 			{
 				cv::Point3f p;
@@ -437,18 +426,16 @@ void grabberCallback(const PointCloud<PointXYZRGBA>::ConstPtr& cloud)
 				p.z = result_cluster->points[i].z;
 				drawCircle(im_draw, p, 10, cv::Scalar( 0, 0, 255 ), 4);
 			}
+			
+			drawCircle(im_draw, roi_center, 20, cv::Scalar( 0, 255, 0 ), 4);
+	    		drawCircle(im_draw, center, 20, cv::Scalar( 0, 255, 255 ), 4);
 	    		
 	    		cv::imshow("path",im_draw);
 			cv::namedWindow( "path", CV_WINDOW_AUTOSIZE );
 			
 			end = clock();
-			cout << "Time required for remove hand: "<< (double)(end-start)/CLOCKS_PER_SEC << " seconds." << "\n\n";
-	    		
-	    		
-	    		//convertImage(*roi, image, mycloud->width, mycloud->height, 2);
-	    		//image.copyTo(im_draw);
-	    		//cv::namedWindow( "roi", CV_WINDOW_AUTOSIZE );
-	    		//cv::imshow("roi",im_draw);
+			cout << "Time required for calculating path: "<< (double)(end-start)/CLOCKS_PER_SEC << " seconds." << "\n\n";
+	    	
 	    		
 	    		cout << "Press [SPACE] for start tracking" << endl << "Press [ESC] for exit" << endl << "Press [c] for capturing again" << endl;
 			key = cv::waitKey(0);
@@ -474,6 +461,22 @@ void grabberCallback(const PointCloud<PointXYZRGBA>::ConstPtr& cloud)
 	{
 		DEBUG(2, cout << "Mode tracking" << endl);
 		
+		calcMeanShift(roi_center,  result_cluster, (float)mean_shift_radius / 100);
+		
+		// remove hand
+    		start = clock();
+    		DEBUG(1, cout << "Start remove hand" << endl);
+    		pcl::PointCloud<pcl::PointXYZRGB>::Ptr roi (new pcl::PointCloud<pcl::PointXYZRGB>);
+		removeHand(mycloud, roi_center, roi);
+		
+		end = clock();
+		DEBUG(1, cout << "Time required for remove hand: "<< (double)(end-start)/CLOCKS_PER_SEC << " seconds." << "\n\n");
+		
+		convertImage(*mycloud, image, mycloud->width, mycloud->height, 1);
+		image.copyTo(im_draw);
+		cv::namedWindow( "roi", CV_WINDOW_AUTOSIZE );
+    		cv::imshow("roi",im_draw);
+	    		
 		
 		trackImage(mycloud);
 		if (lost_pose_counter >= max_loose_pose)
@@ -750,9 +753,32 @@ void removeBackground(PointCloud<PointXYZRGB>::Ptr& cloud, PointCloud<PointXYZRG
 // remove hand
 void removeHand(PointCloud<PointXYZRGB>::Ptr& cloud, cv::Point3f roi_center, PointCloud<PointXYZRGB>::Ptr& result )
 {
-  
-  return;
+	pcl::KdTreeFLANN<pcl::PointXYZRGB> kdtree;
 
+	kdtree.setInputCloud (cloud);
+	std::vector<int> indices = getNearestNeigboursInRadius(kdtree, 0.2, roi_center);
+	
+	std::sort (indices.begin(), indices.end());
+	
+	//result->points.clear();
+	for (int i = 0; i < cloud->points.size(); i++)
+	{
+		if (!(std::binary_search (indices.begin(), indices.end(), i)))
+		{
+			cloud->points[i].x = bad_point;
+			cloud->points[i].y = bad_point;
+			cloud->points[i].z = bad_point;
+			cloud->points[i].r = 0;
+			cloud->points[i].g = 0;
+			cloud->points[i].b = 0;
+		}
+		
+		
+	
+	}
+	result->width = result->points.size ();
+    	result->height = 1;
+    	result->is_dense = false;
 }
 
 
@@ -1004,61 +1030,6 @@ int getMinNodeIndex(std::vector<Node> list)
 
 }
 
-
-std::vector<int> getNeigbours(PointCloud<PointXYZRGB>::Ptr& cloud, Node n)
-{
-	std::vector<int> result;
-
-	int row = n.pcl_index / cloud->width;
-	int col = n.pcl_index % cloud->width;
-	
-	
-	
-	if (row - 1 >= 0)
-	{
-		if (col - 1 >= 0)
-		{
-			result.push_back(cloud->width * (row-1) + (col-1)); 
-		}
-		
-		result.push_back(cloud->width * (row-1) + (col));
-		
-		if (col + 1 < cloud->width)
-		{
-			result.push_back(cloud->width * (row-1) + (col+1));
-		} 
-		
-	}
-	
-	if (row + 1 < cloud->height)
-	{
-		if (col - 1 >= 0)
-		{
-			result.push_back(cloud->width * (row+1) + (col-1)); 
-		}
-		
-		result.push_back(cloud->width * (row+1) + (col));
-		
-		if (col + 1 < cloud->width)
-		{
-			result.push_back(cloud->width * (row+1) + (col+1));
-		} 
-	}
-	
-	if (col - 1 >= 0)
-	{
-		result.push_back(cloud->width * (row) + (col-1)); 
-	}
-	
-	if (col + 1 < cloud->width)
-	{
-		result.push_back(cloud->width * (row) + (col+1));
-	} 
-		
-		
-	return result;
-}
-
 std::vector<int> getShortestPath(PointCloud<PointXYZRGB>::Ptr& cloud, cv::Point3f start, cv::Point3f end, float maxDist)
 {
 	pcl::KdTreeFLANN<pcl::PointXYZRGB> kdtree;
@@ -1081,11 +1052,6 @@ std::vector<int> getShortestPath(PointCloud<PointXYZRGB>::Ptr& cloud, cv::Point3
 	PointXYZRGB p2 = cloud->points[vend[0]];
 	
 	
-	
-	
-	
-	
-	// old version
 	std::vector<Node> openSet;
 	std::vector<Node> closedSet;
 	
@@ -1213,7 +1179,7 @@ std::vector<int> getShortestPath(PointCloud<PointXYZRGB>::Ptr& cloud, cv::Point3
 	}
 	else
 	{
-		cout << "No path found" << endl;
+		cout << "A* ERROR: No path found" << endl;
 		
 		BOOST_FOREACH(Node n, closedSet)
 		{
@@ -1446,7 +1412,7 @@ void stopTracker()
 	gfilt.getGlobalCloudFiltered(tsf.getMap(), *glob_cloud);
 	
 	pcl::copyPointCloud<pcl::PointXYZRGBNormal, pcl::PointXYZRGB>(*glob_cloud, *mycloud);
-	postProcessing(mycloud);
+	//postProcessing(mycloud);
 
 	if (file_cloud.size()>0) pcl::io::savePCDFileBinary(file_cloud, *mycloud);
 
