@@ -1,1 +1,7 @@
+/home/dom/diplomata/hand_learning/cpp/hand_learning/build/CMakeFiles/rebuild_cache.dir
+/home/dom/diplomata/hand_learning/cpp/hand_learning/build/CMakeFiles/list_install_components.dir
+/home/dom/diplomata/hand_learning/cpp/hand_learning/build/CMakeFiles/install.dir
+/home/dom/diplomata/hand_learning/cpp/hand_learning/build/CMakeFiles/install/local.dir
+/home/dom/diplomata/hand_learning/cpp/hand_learning/build/CMakeFiles/install/strip.dir
+/home/dom/diplomata/hand_learning/cpp/hand_learning/build/CMakeFiles/edit_cache.dir
 /home/dom/diplomata/hand_learning/cpp/hand_learning/build/CMakeFiles/hand_learning.dir

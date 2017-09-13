@@ -17,6 +17,12 @@
 //The threading library used by boost-thread
 BOOST_THREAD_LIBRARY:FILEPATH=/usr/lib/x86_64-linux-gnu/libpthread.so
 
+//Boost atomic library (debug)
+Boost_ATOMIC_LIBRARY_DEBUG:FILEPATH=/usr/lib/x86_64-linux-gnu/libboost_atomic.so
+
+//Boost atomic library (release)
+Boost_ATOMIC_LIBRARY_RELEASE:FILEPATH=/usr/lib/x86_64-linux-gnu/libboost_atomic.so
+
 //Boost chrono library (debug)
 Boost_CHRONO_LIBRARY_DEBUG:FILEPATH=/usr/lib/x86_64-linux-gnu/libboost_chrono.so
 
@@ -46,6 +52,12 @@ Boost_IOSTREAMS_LIBRARY_RELEASE:FILEPATH=/usr/lib/x86_64-linux-gnu/libboost_iost
 
 //Boost library directory
 Boost_LIBRARY_DIR:PATH=/usr/lib/x86_64-linux-gnu
+
+//Boost regex library (debug)
+Boost_REGEX_LIBRARY_DEBUG:FILEPATH=/usr/lib/x86_64-linux-gnu/libboost_regex.so
+
+//Boost regex library (release)
+Boost_REGEX_LIBRARY_RELEASE:FILEPATH=/usr/lib/x86_64-linux-gnu/libboost_regex.so
 
 //Boost serialization library (debug)
 Boost_SERIALIZATION_LIBRARY_DEBUG:FILEPATH=/usr/lib/x86_64-linux-gnu/libboost_serialization.so
@@ -489,6 +501,10 @@ libfreenect_DIR:PATH=/opt/ros/indigo/share/libfreenect
 # INTERNAL cache entries
 ########################
 
+//ADVANCED property for variable: Boost_ATOMIC_LIBRARY_DEBUG
+Boost_ATOMIC_LIBRARY_DEBUG-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: Boost_ATOMIC_LIBRARY_RELEASE
+Boost_ATOMIC_LIBRARY_RELEASE-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: Boost_CHRONO_LIBRARY_DEBUG
 Boost_CHRONO_LIBRARY_DEBUG-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: Boost_CHRONO_LIBRARY_RELEASE
@@ -509,6 +525,10 @@ Boost_IOSTREAMS_LIBRARY_DEBUG-ADVANCED:INTERNAL=1
 Boost_IOSTREAMS_LIBRARY_RELEASE-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: Boost_LIBRARY_DIR
 Boost_LIBRARY_DIR-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: Boost_REGEX_LIBRARY_DEBUG
+Boost_REGEX_LIBRARY_DEBUG-ADVANCED:INTERNAL=1
+//ADVANCED property for variable: Boost_REGEX_LIBRARY_RELEASE
+Boost_REGEX_LIBRARY_RELEASE-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: Boost_SERIALIZATION_LIBRARY_DEBUG
 Boost_SERIALIZATION_LIBRARY_DEBUG-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: Boost_SERIALIZATION_LIBRARY_RELEASE
@@ -523,18 +543,16 @@ Boost_THREAD_LIBRARY_DEBUG-ADVANCED:INTERNAL=1
 Boost_THREAD_LIBRARY_RELEASE-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: CMAKE_AR
 CMAKE_AR-ADVANCED:INTERNAL=1
-//ADVANCED property for variable: CMAKE_BUILD_TOOL
-CMAKE_BUILD_TOOL-ADVANCED:INTERNAL=1
 //What is the target build tool cmake is generating for.
 CMAKE_BUILD_TOOL:INTERNAL=/usr/bin/make
 //This is the directory where this CMakeCache.txt was created
 CMAKE_CACHEFILE_DIR:INTERNAL=/home/dom/diplomata/hand_learning/cpp/hand_learning/build
 //Major version of cmake used to create the current loaded cache
-CMAKE_CACHE_MAJOR_VERSION:INTERNAL=2
+CMAKE_CACHE_MAJOR_VERSION:INTERNAL=3
 //Minor version of cmake used to create the current loaded cache
-CMAKE_CACHE_MINOR_VERSION:INTERNAL=8
+CMAKE_CACHE_MINOR_VERSION:INTERNAL=5
 //Patch version of cmake used to create the current loaded cache
-CMAKE_CACHE_PATCH_VERSION:INTERNAL=12
+CMAKE_CACHE_PATCH_VERSION:INTERNAL=1
 //ADVANCED property for variable: CMAKE_COLOR_MAKEFILE
 CMAKE_COLOR_MAKEFILE-ADVANCED:INTERNAL=1
 //Path to CMake executable.
@@ -585,8 +603,18 @@ CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO-ADVANCED:INTERNAL=1
 CMAKE_EXPORT_COMPILE_COMMANDS-ADVANCED:INTERNAL=1
 //Name of generator.
 CMAKE_GENERATOR:INTERNAL=Unix Makefiles
+//Name of generator platform.
+CMAKE_GENERATOR_PLATFORM:INTERNAL=
 //Name of generator toolset.
 CMAKE_GENERATOR_TOOLSET:INTERNAL=
+//Have symbol pthread_create
+CMAKE_HAVE_LIBC_CREATE:INTERNAL=
+//Have library pthreads
+CMAKE_HAVE_PTHREADS_CREATE:INTERNAL=
+//Have library pthread
+CMAKE_HAVE_PTHREAD_CREATE:INTERNAL=1
+//Have include pthread.h
+CMAKE_HAVE_PTHREAD_H:INTERNAL=1
 //Start directory with the top level CMakeLists.txt file for this
 // project
 CMAKE_HOME_DIRECTORY:INTERNAL=/home/dom/diplomata/hand_learning/cpp/hand_learning
@@ -610,6 +638,8 @@ CMAKE_MODULE_LINKER_FLAGS_RELWITHDEBINFO-ADVANCED:INTERNAL=1
 CMAKE_NM-ADVANCED:INTERNAL=1
 //number of local generators
 CMAKE_NUMBER_OF_LOCAL_GENERATORS:INTERNAL=1
+//number of local generators
+CMAKE_NUMBER_OF_MAKEFILES:INTERNAL=1
 //ADVANCED property for variable: CMAKE_OBJCOPY
 CMAKE_OBJCOPY-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: CMAKE_OBJDUMP
@@ -617,7 +647,7 @@ CMAKE_OBJDUMP-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: CMAKE_RANLIB
 CMAKE_RANLIB-ADVANCED:INTERNAL=1
 //Path to CMake installation.
-CMAKE_ROOT:INTERNAL=/usr/share/cmake-2.8
+CMAKE_ROOT:INTERNAL=/usr/share/cmake-3.5
 //ADVANCED property for variable: CMAKE_SHARED_LINKER_FLAGS
 CMAKE_SHARED_LINKER_FLAGS-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: CMAKE_SHARED_LINKER_FLAGS_DEBUG
@@ -655,7 +685,7 @@ FIND_PACKAGE_MESSAGE_DETAILS_Flann:INTERNAL=[/usr/lib/x86_64-linux-gnu/libflann_
 //Details about finding OpenNI2
 FIND_PACKAGE_MESSAGE_DETAILS_OpenNI2:INTERNAL=[/opt/ros/indigo/lib/libOpenNI2.so][/usr/include/openni2][v()]
 //Details about finding PCL
-FIND_PACKAGE_MESSAGE_DETAILS_PCL:INTERNAL=[/usr/lib/x86_64-linux-gnu/libboost_system.so;/usr/lib/x86_64-linux-gnu/libboost_filesystem.so;/usr/lib/x86_64-linux-gnu/libboost_thread.so;/usr/lib/x86_64-linux-gnu/libboost_date_time.so;/usr/lib/x86_64-linux-gnu/libboost_iostreams.so;/usr/lib/x86_64-linux-gnu/libboost_serialization.so;/usr/lib/x86_64-linux-gnu/libboost_chrono.so;/usr/lib/x86_64-linux-gnu/libpthread.so;optimized;/usr/lib/libpcl_common.so;debug;/usr/lib/libpcl_common.so;optimized;/usr/lib/x86_64-linux-gnu/libflann_cpp_s.a;debug;/usr/lib/x86_64-linux-gnu/libflann_cpp_s.a;optimized;/usr/lib/libpcl_kdtree.so;debug;/usr/lib/libpcl_kdtree.so;optimized;/usr/lib/libpcl_octree.so;debug;/usr/lib/libpcl_octree.so;optimized;/usr/lib/libpcl_search.so;debug;/usr/lib/libpcl_search.so;optimized;/usr/lib/x86_64-linux-gnu/libqhull.so;debug;/usr/lib/x86_64-linux-gnu/libqhull.so;optimized;/usr/lib/libpcl_surface.so;debug;/usr/lib/libpcl_surface.so;optimized;/usr/lib/libpcl_sample_consensus.so;debug;/usr/lib/libpcl_sample_consensus.so;/usr/lib/libOpenNI.so;/opt/ros/indigo/lib/libOpenNI2.so;vtkCommon;vtkFiltering;vtkImaging;vtkGraphics;vtkGenericFiltering;vtkIO;vtkRendering;vtkVolumeRendering;vtkHybrid;vtkWidgets;vtkParallel;vtkInfovis;vtkGeovis;vtkViews;vtkCharts;optimized;/usr/lib/libpcl_io.so;debug;/usr/lib/libpcl_io.so;optimized;/usr/lib/libpcl_filters.so;debug;/usr/lib/libpcl_filters.so;optimized;/usr/lib/libpcl_features.so;debug;/usr/lib/libpcl_features.so;optimized;/usr/lib/libpcl_keypoints.so;debug;/usr/lib/libpcl_keypoints.so;optimized;/usr/lib/libpcl_registration.so;debug;/usr/lib/libpcl_registration.so;optimized;/usr/lib/libpcl_segmentation.so;debug;/usr/lib/libpcl_segmentation.so;optimized;/usr/lib/libpcl_recognition.so;debug;/usr/lib/libpcl_recognition.so;optimized;/usr/lib/libpcl_visualization.so;debug;/usr/lib/libpcl_visualization.so;optimized;/usr/lib/libpcl_people.so;debug;/usr/lib/libpcl_people.so;optimized;/usr/lib/libpcl_outofcore.so;debug;/usr/lib/libpcl_outofcore.so;optimized;/usr/lib/libpcl_tracking.so;debug;/usr/lib/libpcl_tracking.so;optimized;/usr/lib/libpcl_apps.so;debug;/usr/lib/libpcl_apps.so;/usr/lib/x86_64-linux-gnu/libboost_system.so;/usr/lib/x86_64-linux-gnu/libboost_filesystem.so;/usr/lib/x86_64-linux-gnu/libboost_thread.so;/usr/lib/x86_64-linux-gnu/libboost_date_time.so;/usr/lib/x86_64-linux-gnu/libboost_iostreams.so;/usr/lib/x86_64-linux-gnu/libboost_serialization.so;/usr/lib/x86_64-linux-gnu/libboost_chrono.so;/usr/lib/x86_64-linux-gnu/libpthread.so;optimized;/usr/lib/x86_64-linux-gnu/libqhull.so;debug;/usr/lib/x86_64-linux-gnu/libqhull.so;/usr/lib/libOpenNI.so;/opt/ros/indigo/lib/libOpenNI2.so;optimized;/usr/lib/x86_64-linux-gnu/libflann_cpp_s.a;debug;/usr/lib/x86_64-linux-gnu/libflann_cpp_s.a;vtkCommon;vtkFiltering;vtkImaging;vtkGraphics;vtkGenericFiltering;vtkIO;vtkRendering;vtkVolumeRendering;vtkHybrid;vtkWidgets;vtkParallel;vtkInfovis;vtkGeovis;vtkViews;vtkCharts][/usr/include/pcl-1.7;/usr/include/eigen3;/usr/include;/usr/include/ni;/usr/include/openni2;/usr/include/vtk-5.8][v()]
+FIND_PACKAGE_MESSAGE_DETAILS_PCL:INTERNAL=[/usr/lib/x86_64-linux-gnu/libboost_system.so;/usr/lib/x86_64-linux-gnu/libboost_filesystem.so;/usr/lib/x86_64-linux-gnu/libboost_thread.so;/usr/lib/x86_64-linux-gnu/libboost_date_time.so;/usr/lib/x86_64-linux-gnu/libboost_iostreams.so;/usr/lib/x86_64-linux-gnu/libboost_serialization.so;/usr/lib/x86_64-linux-gnu/libboost_chrono.so;/usr/lib/x86_64-linux-gnu/libboost_atomic.so;/usr/lib/x86_64-linux-gnu/libboost_regex.so;/usr/lib/x86_64-linux-gnu/libpthread.so;optimized;/usr/lib/libpcl_common.so;debug;/usr/lib/libpcl_common.so;optimized;/usr/lib/x86_64-linux-gnu/libflann_cpp_s.a;debug;/usr/lib/x86_64-linux-gnu/libflann_cpp_s.a;optimized;/usr/lib/libpcl_kdtree.so;debug;/usr/lib/libpcl_kdtree.so;optimized;/usr/lib/libpcl_octree.so;debug;/usr/lib/libpcl_octree.so;optimized;/usr/lib/libpcl_search.so;debug;/usr/lib/libpcl_search.so;optimized;/usr/lib/x86_64-linux-gnu/libqhull.so;debug;/usr/lib/x86_64-linux-gnu/libqhull.so;optimized;/usr/lib/libpcl_surface.so;debug;/usr/lib/libpcl_surface.so;optimized;/usr/lib/libpcl_sample_consensus.so;debug;/usr/lib/libpcl_sample_consensus.so;/usr/lib/libOpenNI.so;/opt/ros/indigo/lib/libOpenNI2.so;vtkCommon;vtkFiltering;vtkImaging;vtkGraphics;vtkGenericFiltering;vtkIO;vtkRendering;vtkVolumeRendering;vtkHybrid;vtkWidgets;vtkParallel;vtkInfovis;vtkGeovis;vtkViews;vtkCharts;optimized;/usr/lib/libpcl_io.so;debug;/usr/lib/libpcl_io.so;optimized;/usr/lib/libpcl_filters.so;debug;/usr/lib/libpcl_filters.so;optimized;/usr/lib/libpcl_features.so;debug;/usr/lib/libpcl_features.so;optimized;/usr/lib/libpcl_keypoints.so;debug;/usr/lib/libpcl_keypoints.so;optimized;/usr/lib/libpcl_registration.so;debug;/usr/lib/libpcl_registration.so;optimized;/usr/lib/libpcl_segmentation.so;debug;/usr/lib/libpcl_segmentation.so;optimized;/usr/lib/libpcl_recognition.so;debug;/usr/lib/libpcl_recognition.so;optimized;/usr/lib/libpcl_visualization.so;debug;/usr/lib/libpcl_visualization.so;optimized;/usr/lib/libpcl_people.so;debug;/usr/lib/libpcl_people.so;optimized;/usr/lib/libpcl_outofcore.so;debug;/usr/lib/libpcl_outofcore.so;optimized;/usr/lib/libpcl_tracking.so;debug;/usr/lib/libpcl_tracking.so;optimized;/usr/lib/libpcl_apps.so;debug;/usr/lib/libpcl_apps.so;/usr/lib/x86_64-linux-gnu/libboost_system.so;/usr/lib/x86_64-linux-gnu/libboost_filesystem.so;/usr/lib/x86_64-linux-gnu/libboost_thread.so;/usr/lib/x86_64-linux-gnu/libboost_date_time.so;/usr/lib/x86_64-linux-gnu/libboost_iostreams.so;/usr/lib/x86_64-linux-gnu/libboost_serialization.so;/usr/lib/x86_64-linux-gnu/libboost_chrono.so;/usr/lib/x86_64-linux-gnu/libboost_atomic.so;/usr/lib/x86_64-linux-gnu/libboost_regex.so;/usr/lib/x86_64-linux-gnu/libpthread.so;optimized;/usr/lib/x86_64-linux-gnu/libqhull.so;debug;/usr/lib/x86_64-linux-gnu/libqhull.so;/usr/lib/libOpenNI.so;/opt/ros/indigo/lib/libOpenNI2.so;optimized;/usr/lib/x86_64-linux-gnu/libflann_cpp_s.a;debug;/usr/lib/x86_64-linux-gnu/libflann_cpp_s.a;vtkCommon;vtkFiltering;vtkImaging;vtkGraphics;vtkGenericFiltering;vtkIO;vtkRendering;vtkVolumeRendering;vtkHybrid;vtkWidgets;vtkParallel;vtkInfovis;vtkGeovis;vtkViews;vtkCharts][/usr/include/pcl-1.7;/usr/include/eigen3;/usr/include;/usr/include/ni;/usr/include/openni2;/usr/include/vtk-5.8][v()]
 //Details about finding PCL_APPS
 FIND_PACKAGE_MESSAGE_DETAILS_PCL_APPS:INTERNAL=[/usr/lib/libpcl_apps.so][/usr/include/pcl-1.7][v()]
 //Details about finding PCL_COMMON
@@ -694,6 +724,8 @@ FIND_PACKAGE_MESSAGE_DETAILS_PCL_SURFACE:INTERNAL=[/usr/lib/libpcl_surface.so][/
 FIND_PACKAGE_MESSAGE_DETAILS_PCL_TRACKING:INTERNAL=[/usr/lib/libpcl_tracking.so][/usr/include/pcl-1.7][v()]
 //Details about finding PCL_VISUALIZATION
 FIND_PACKAGE_MESSAGE_DETAILS_PCL_VISUALIZATION:INTERNAL=[/usr/lib/libpcl_visualization.so][/usr/include/pcl-1.7][v()]
+//Details about finding Threads
+FIND_PACKAGE_MESSAGE_DETAILS_Threads:INTERNAL=[TRUE][v()]
 //Details about finding eigen
 FIND_PACKAGE_MESSAGE_DETAILS_eigen:INTERNAL=[/usr/include/eigen3][v()]
 //Details about finding libusb-1.0
@@ -937,11 +969,17 @@ _BOOST_INCLUDEDIR_LAST:INTERNAL=/usr/include
 //Last used Boost_ADDITIONAL_VERSIONS value.
 _Boost_ADDITIONAL_VERSIONS_LAST:INTERNAL=1.47;1.47.0
 //Components requested for this build tree.
-_Boost_COMPONENTS_SEARCHED:INTERNAL=chrono;date_time;filesystem;iostreams;serialization;system;thread
+_Boost_COMPONENTS_SEARCHED:INTERNAL=atomic;chrono;date_time;filesystem;iostreams;regex;serialization;system;thread
 //Last used Boost_INCLUDE_DIR value.
 _Boost_INCLUDE_DIR_LAST:INTERNAL=/usr/include
+//Last used Boost_LIBRARY_DIR_DEBUG value.
+_Boost_LIBRARY_DIR_DEBUG_LAST:INTERNAL=/usr/lib/x86_64-linux-gnu
 //Last used Boost_LIBRARY_DIR value.
 _Boost_LIBRARY_DIR_LAST:INTERNAL=/usr/lib/x86_64-linux-gnu
+//Last used Boost_LIBRARY_DIR_RELEASE value.
+_Boost_LIBRARY_DIR_RELEASE_LAST:INTERNAL=/usr/lib/x86_64-linux-gnu
+//Last used Boost_NAMESPACE value.
+_Boost_NAMESPACE_LAST:INTERNAL=boost
 //Last used Boost_USE_MULTITHREADED value.
 _Boost_USE_MULTITHREADED_LAST:INTERNAL=TRUE
 __pkg_config_checked_PC_EIGEN:INTERNAL=1
