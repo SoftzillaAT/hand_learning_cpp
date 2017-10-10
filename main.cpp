@@ -29,6 +29,10 @@
 #include <pcl/common/centroid.h>
 
 
+#include "boost/filesystem.hpp"
+#include "FaceDetection.h"
+#include "ObjSegmentation.h"
+
 #include <cv.h>
 #include <highgui.h>
 #include <opencv2/calib3d/calib3d.hpp>
@@ -71,6 +75,8 @@
 #include "v4r/camera_tracking_and_mapping/TSFGlobalCloudFilteringSimple.h"
 #include "v4r/io/filesystem.h"
 
+
+using namespace boost::filesystem;
 using namespace std;
 using namespace pcl;
 
@@ -97,6 +103,8 @@ typedef boost::graph_traits<UndirectedGraph>::edge_iterator edge_iterator;
 /* ######################### Methods ############################## */
 void printUsage(const char*);
 void grabberCallback(const PointCloud<PointXYZRGBA>::ConstPtr&);
+void callbackFromFolder(const char* folder);
+
 void calculateCameraSettings(PointCloud<PointXYZRGB>::Ptr& cloud);
 void removeBackground(PointCloud<PointXYZRGB>::Ptr&, PointCloud<PointXYZRGB>::Ptr&);
 std::vector<cv::Point3f> calcMeanShiftPoints(PointCloud<PointXYZRGB>::Ptr&);
@@ -104,10 +112,15 @@ void postProcessing(PointCloud<PointXYZRGB>::Ptr&);
 void calcMeanShift(cv::Point3f &p, PointCloud<PointXYZRGB>::Ptr&, float radius);
 cv::Point3f getCenterPoint(std::vector<cv::Point3f> points);
 cv::Point3f getClusterPoint(std::vector<cv::Point3f> points);
+
 void removeHand(PointCloud<PointXYZRGB>::Ptr&, cv::Point3f roi_center, PointCloud<PointXYZRGB>::Ptr&); 
+
 std::vector<int> getKNearestNeigbours(pcl::KdTreeFLANN<pcl::PointXYZRGB> kdtree, int K, cv::Point3f p); // get k nearest neighbours and returns their index
 std::vector<int> getNearestNeigboursInRadius(pcl::KdTreeFLANN<pcl::PointXYZRGB> kdtree, float radius, cv::Point3f p);
 std::vector<int> getShortestPath(PointCloud<PointXYZRGB>::Ptr&, cv::Point3f start, cv::Point3f end, float maxDist); // maxDist=maximum distance between 2 neighbours
+
+std::vector<int> getImageBorder(PointCloud<PointXYZRGB>::Ptr& cloud, PointCloud<PointXYZRGB>::Ptr& filtered_cloud);
+cv::Point3f getOrigin(PointCloud<PointXYZRGB>::Ptr& filtered_cloud, std::vector<int> border_points);
 
 void convertImage(const pcl::PointCloud<pcl::PointXYZRGB> &cloud, cv::Mat &image);
 void convertImage(const pcl::PointCloud<pcl::PointXYZRGBA> &_cloud, cv::Mat &_image);
@@ -179,9 +192,9 @@ double thr_delta_angle = 80; // e.g. 80
 int poisson_depth = 6;
 int display = true;
 
-int max_camera_distance = 150; // in [cm]
+int min_camera_distance = 50; // in [cm]
 int num_particles = 20;
-int num_calibration_frames = 10;
+int num_calibration_frames = 1;
 int cnt_calibration_frames;
 
 cv::Point track_win[2];
@@ -189,18 +202,25 @@ cv::Point track_win[2];
 int mean_shift_radius = 15; // in cm
 cv::Point3f roi_center;
 std::vector<cv::Point3f> roiPoints;
+cv::Point3f min_point; // nearest point to camera
 
 // camera parameter
 bool init_camera = false;
 cv::Mat rvec = cv::Mat::zeros(3, 1, CV_64F);
 cv::Mat tvec = cv::Mat::zeros(3, 1, CV_64F);
 
+bool view_error = false;
+bool filediskmode = false;
+int filedisk_counter = 0;
+string read_path;
 
 // min cut parameters
-int mc_sigma=0.25*100;
-int mc_radius=0.3*100;
-int mc_numberOfNeighbours=7;
-int mc_sourceWeight =0.6*100;
+int border_dist=3;
+int border_offset=3;
+
+// hysterese params
+int hyst_dist1=50;
+int hyst_dist2=20;
 
 /*********************************************************************
  * Main entrypoint of the program
@@ -214,14 +234,21 @@ int main(int argc, char** argv)
 		printUsage(argv[0]);
 		return -1;
 	}
-
-
+	
+	if (argc > 1)
+	{
+		filediskmode = true;
+		DEBUG(1, cout << "Enter filedisk mode" << endl);
+		read_path = read_path.assign(argv[1]);
+	}
+	
 	openniGrabber = new OpenNIGrabber();
 	if (openniGrabber == 0)
 		return -1;
 	boost::function<void (const PointCloud<PointXYZRGBA>::ConstPtr&)> f =
 		boost::bind(&grabberCallback, _1);
 	openniGrabber->registerCallback(f);
+	
 	
 	// gui for the visualization
 	cv::namedWindow( "image", CV_WINDOW_AUTOSIZE );
@@ -239,15 +266,13 @@ int main(int argc, char** argv)
 	
 	// trackbars
 	cv::namedWindow("trackbars",CV_WINDOW_KEEPRATIO);
-	cv::createTrackbar("Max camera distance [cm]","trackbars", &max_camera_distance, 400);
+	cv::createTrackbar("Max camera distance [cm]","trackbars", &min_camera_distance, 400);
 	cv::createTrackbar("Mean_shift radius [cm]","trackbars", &mean_shift_radius, 100);
 	cv::createTrackbar("Number of patricles","trackbars", &num_particles, 200);
-	cv::createTrackbar("Number of calibraion frames","trackbars", &num_calibration_frames, 100);
+	cv::createTrackbar("Number of calibraion frames","trackbars", &num_calibration_frames, 1000);
 	
-	cv::createTrackbar("MIN CUT: sigma","trackbars", &mc_sigma, 1000);
-	cv::createTrackbar("MIN CUT: radius","trackbars", &mc_radius, 500);
-	cv::createTrackbar("MIN CUT: number of neighbours","trackbars", &mc_numberOfNeighbours, 500);
-	cv::createTrackbar("MIN CUT: source weight","trackbars", &mc_sourceWeight, 1000);
+	cv::createTrackbar("Hysterese dist 1", "trackbars", &hyst_dist1, 200);
+	cv::createTrackbar("Hysterese dist 2", "trackbars", &hyst_dist2, 200);
 	
 
 	while(!stopCamera)
@@ -293,32 +318,84 @@ void printUsage(const char* programName)
  ********************************************************************/
 void grabberCallback(const PointCloud<PointXYZRGBA>::ConstPtr& cloud)
 {
+
+	 
 	clock_t gstart, gend, start, end;
 	gstart = clock();
-	start = clock();
 	DEBUG(2, cout << "Callback..." << endl);
 	// copy to the pcl for write-access
 	pcl::copyPointCloud<pcl::PointXYZRGBA, pcl::PointXYZRGB>(*cloud, *mycloud);
+	
+	if (filediskmode)
+	{
+		stringstream pcd_file;
+		//pcd_file << read_path << "/inputCloud" << filedisk_counter << ".pcd";
+		pcd_file << "./binary_3/inputCloud5.pcd";
+		if ( pcl::io::loadPCDFile <pcl::PointXYZRGB> (pcd_file.str(), *mycloud) == -1 )
+		{
+			std::cout << "Cloud reading failed." << std::endl;
+			stopCamera = true;
+			return;
+		}
+	}
 	
 	if(!init_camera)
 	{
 		 calculateCameraSettings(mycloud);
 	}
 	
-	//convertImage(*mycloud, image);
-    	convertImage(*mycloud, image, mycloud->width, mycloud->height, 0);
-    	
-    	image.copyTo(im_draw);
-	cv::imshow("orig",im_draw);
+	convertImage(*mycloud, image);
+  /*
+	FaceDetection face(image);
+	
+	if(face.detectFace())
+	{
+		face.showResult();
+	}
+	else
+	{
+		cout << "Unable to detect face" << endl;
+	}
+*/
+	
+	start = clock();
+	cout << "Start Segmentation" << endl;
+	ObjSegmentation seg(image);
+	std::vector<cv::Vec3b> ref_pixels;
+	ref_pixels.push_back(cv::Vec3b(178, 113, 149));
+	ref_pixels.push_back(cv::Vec3b(2, 108, 147));
+	seg.setSkinMask(ref_pixels, hyst_dist1, hyst_dist2);
+	seg.applyMask(mycloud); 
+	
 	end = clock();
-	cout << "Time required for init: "<< (double)(end-start)/CLOCKS_PER_SEC << " seconds." << "\n\n";
+	DEBUG(1, cout << "Time required for segmentation: "<< (double)(end-start)/CLOCKS_PER_SEC << " seconds." << "\n\n");
+	
+	convertImage(*mycloud, image, mycloud->width, mycloud->height, 0);
+    	image.copyTo(im_draw);
+    	cv::imshow("orig",im_draw);
+    	
+    	
+    	cv::Mat M_valid (mycloud->height, mycloud->width, CV_8UC3 , cv::Scalar(0,255,0));
+    	cv::Mat M_error (mycloud->height, mycloud->width, CV_8UC3 , cv::Scalar(0,0,255));
+    	
+    	if (view_error)
+    	{
+    		M_error.copyTo(im_draw);
+    	}
+    	else
+    	{
+    		M_valid.copyTo(im_draw);
+    	}
+    	//cv::namedWindow( "feedback", CV_WINDOW_AUTOSIZE );
+    	//cv::imshow("feedback",im_draw);
+	
 	pcl::PointCloud<pcl::PointXYZRGB>::Ptr result_cluster (new pcl::PointCloud<pcl::PointXYZRGB>);
 
 	start = clock();
 	
 	removeBackground(mycloud, result_cluster);
 	end = clock();
-	cout << "Time required for remove background: "<< (double)(end-start)/CLOCKS_PER_SEC << " seconds." << "\n\n";
+	DEBUG(2, cout << "Time required for remove background: "<< (double)(end-start)/CLOCKS_PER_SEC << " seconds." << "\n\n");
 	
 	
 	
@@ -351,23 +428,43 @@ void grabberCallback(const PointCloud<PointXYZRGBA>::ConstPtr& cloud)
 		start = clock();
 		std::vector<cv::Point3f> mean_shift_points = calcMeanShiftPoints(result_cluster);
 		end = clock();
-		cout << "Time required for [" << mean_shift_points.size() << "] mean shift points: "<< (double)(end-start)/CLOCKS_PER_SEC << " seconds." << "\n\n";
+		DEBUG(1, cout << "Time required for [" << mean_shift_points.size() << "] mean shift points: "<< (double)(end-start)/CLOCKS_PER_SEC << " seconds." << "\n\n");
 		std::sort(mean_shift_points.begin(), mean_shift_points.end(), lexico_compare3f);
 	    	//mean_shift_points.erase(std::unique(mean_shift_points.begin(), mean_shift_points.end(), points_are_equal3f), mean_shift_points.end());
 	    	
+	    	
+	    	// get image border
+	    	start = clock();
+	    	std::vector<int> border_points = getImageBorder(mycloud, result_cluster);
+	    	cv::Point3f origin = getOrigin(result_cluster, border_points);
+	    	end = clock();
+	    	DEBUG(1, cout << "Time required for ImageBorder with [" << border_points.size() << "]  points: "<< (double)(end-start)/CLOCKS_PER_SEC << " seconds." << "\n\n");
+	    	
+	    	convertImage(*result_cluster, image, mycloud->width, mycloud->height, 8);
+	    	image.copyTo(im_draw);
+	    	for (int i = 0; i < border_points.size(); i++)
+	    	{
+	    		pcl::PointXYZRGB &pt = result_cluster->points[ border_points[i] ];
+	    		cv::Point3f p(pt.x, pt.y, pt.z);
+	    		drawCircle(im_draw, p, 8, cv::Scalar( 0, 0, 255 ), 4);
+	    	}
+	    	cv::namedWindow( "border", CV_WINDOW_AUTOSIZE );
+	    	cv::imshow("border",im_draw);
 
 		// calculate center of mean shift points
-		cv::Point3f center = getCenterPoint(mean_shift_points);
+		//cv::Point3f center = getCenterPoint(mean_shift_points);
+		//cv::Point3f center = origin;
+		cv::Point3f center = min_point;
 		cv::Point3f max;
 	
 		// get point far away from the center
-		float max_dist = 0;
+		float min_dist = 100000;
 		for(int i = 0; i < mean_shift_points.size(); i++)
 		{
 			float dist = sqrt(pow(mean_shift_points[i].x - center.x, 2) + pow(mean_shift_points[i].y - center.y, 2) + pow(mean_shift_points[i].z - center.z, 2));
-			if(dist > max_dist)
+			if(dist < min_dist)
 			{
-				max_dist = dist;
+				min_dist = dist;
 				max = mean_shift_points[i];
 			}
 		}
@@ -411,12 +508,14 @@ void grabberCallback(const PointCloud<PointXYZRGBA>::ConstPtr& cloud)
 	    		// get path
 	    		start = clock();
 	    		cout << "Start calculating path" << endl;
-			std::vector<int> path = getShortestPath(result_cluster, roi_center, center, 0.05);
+	    		roi_center = getClusterPoint(roiPoints);
+					cout << "ROI CENTER: " << roi_center << endl;
+			std::vector<int> path = getShortestPath(result_cluster, roi_center, center, 0.1);
 	    		
 	    		// draw path
 	    		convertImage(*mycloud, image, mycloud->width, mycloud->height, 8);
 			image.copyTo(im_draw);
-	    		roi_center = getClusterPoint(roiPoints);
+	    		
 	    		
 	    		BOOST_FOREACH(int i, path)
 			{
@@ -432,6 +531,14 @@ void grabberCallback(const PointCloud<PointXYZRGBA>::ConstPtr& cloud)
 	    		
 	    		cv::imshow("path",im_draw);
 			cv::namedWindow( "path", CV_WINDOW_AUTOSIZE );
+			
+			// draw nearest point to camera
+			convertImage(*mycloud, image, mycloud->width, mycloud->height, 8);
+			image.copyTo(im_draw);
+			drawCircle(im_draw, min_point, 20, cv::Scalar( 0, 255, 0 ), 4);
+			cv::imshow("nearest point",im_draw);
+			cv::namedWindow( "nearest point", CV_WINDOW_AUTOSIZE );
+			
 			
 			end = clock();
 			cout << "Time required for calculating path: "<< (double)(end-start)/CLOCKS_PER_SEC << " seconds." << "\n\n";
@@ -451,6 +558,7 @@ void grabberCallback(const PointCloud<PointXYZRGBA>::ConstPtr& cloud)
 			}
 			else
 			{
+				filedisk_counter++;
 				mode = capture;
 			}
 			
@@ -516,7 +624,7 @@ void grabberCallback(const PointCloud<PointXYZRGBA>::ConstPtr& cloud)
 	}
 	
 	gend = clock();
-	cout << "Time required for CB: "<< (double)(gend-gstart)/CLOCKS_PER_SEC << " seconds." << "\n\n";
+	DEBUG(2, cout << "Time required for CB: "<< (double)(gend-gstart)/CLOCKS_PER_SEC << " seconds." << "\n\n");
 	
 }
 
@@ -720,17 +828,19 @@ void removeBackground(PointCloud<PointXYZRGB>::Ptr& cloud, PointCloud<PointXYZRG
 	
 	
 
-	/*
+	float minz = 10000;
+	int cnt_bad_point = 0;
 	BOOST_FOREACH (pcl::PointXYZRGB& pt, cloud->points)
 	{
 		if (pt.z != pt.z || pt.x != pt.x || pt.y != pt.y)
 		{
-			pt.r = 0;
-			pt.g = 0;
-			pt.b = 0;
+			//pt.r = 0;
+			//pt.g = 0;
+			//pt.b = 0;
+			cnt_bad_point++;
 		
 		}
-			
+		/*	
 		if(pt.z > float(max_camera_distance) / 100)
 		{
 			pt.x = bad_point;
@@ -739,14 +849,22 @@ void removeBackground(PointCloud<PointXYZRGB>::Ptr& cloud, PointCloud<PointXYZRG
 			pt.r = 0;
 			pt.g = 0;
 			pt.b = 0;
+		}*/
+		
+		if (pt.z < minz)
+		{
+			minz = pt.z;
+			min_point.x = pt.x;
+			min_point.y = pt.y;
+			min_point.z = pt.z;
 		}
+		
 		//printf ("\t(%f, %f, %f, %d, %d, %d)\n", pt.x, pt.y, pt.z, pt.r, pt.g, pt.b);
 		
 	}
-	*/ 
-
-
 	
+	float error_value = (float)cnt_bad_point / cloud->points.size();
+	view_error = (minz < (float)min_camera_distance / 100) || (error_value > 0.3);
 }
 
 
@@ -950,6 +1068,13 @@ std::vector<int> getNearestNeigboursInRadius(pcl::KdTreeFLANN<pcl::PointXYZRGB> 
 {
 	pcl::PointXYZRGB searchPoint;
 
+	if (p.x != p.x || p.y != p.y || p.z != p.z)
+	{
+		DEBUG(2, cout << "getNearestNeigboursInRadius: ERROR bad point" << endl);
+		std::vector<int> result;
+		return result;
+	}
+
 	searchPoint.x = p.x;
 	searchPoint.y = p.y;
 	searchPoint.z = p.z;
@@ -1104,10 +1229,10 @@ std::vector<int> getShortestPath(PointCloud<PointXYZRGB>::Ptr& cloud, cv::Point3
 		current.x = min.x;
 		current.y = min.y;
 		current.z = min.z;
-		cout << "Current: " << current << endl;
+		//cout << "Current: " << current << endl;
 		std::vector<int> neighbours_index = getNearestNeigboursInRadius(kdtree, maxDist, current);
 		//std::vector<int> neighbours_index = getKNearestNeigbours(kdtree, 9, current);
-		cout << "Found neighbours:" << neighbours_index.size() << endl;
+		//cout << "Found neighbours:" << neighbours_index.size() << endl;
 		
 
 		BOOST_FOREACH(int i, neighbours_index)
@@ -1148,11 +1273,11 @@ std::vector<int> getShortestPath(PointCloud<PointXYZRGB>::Ptr& cloud, cv::Point3
 		
 	}
 	
-	cout << "A* FINISHED" << endl;
+	//cout << "A* FINISHED" << endl;
 	if (found)
 	{
 		int index = e.pcl_pred_index;
-		cout << "Index " << e.pcl_pred_index << endl;
+		//cout << "Index " << e.pcl_pred_index << endl;
 		
 		while(index >= 0)
 		{
@@ -1172,7 +1297,7 @@ std::vector<int> getShortestPath(PointCloud<PointXYZRGB>::Ptr& cloud, cv::Point3
 			
 			if(!node_found)
 			{
-				cout << "A* Search error: Not not found " << index << endl;
+				cout << "A* Search error: Node not found " << index << endl;
 			}
 		
 		}
@@ -1191,7 +1316,153 @@ std::vector<int> getShortestPath(PointCloud<PointXYZRGB>::Ptr& cloud, cv::Point3
 	return result;
 }
 
+// Get the image border of the filtered cloud. Returns the indices of the border pixels
+std::vector<int> getImageBorder(PointCloud<PointXYZRGB>::Ptr& cloud, PointCloud<PointXYZRGB>::Ptr& filtered_cloud)
+{
+	std::vector<int> result;
+	pcl::KdTreeFLANN<pcl::PointXYZRGB> kdtree;
+	kdtree.setInputCloud (filtered_cloud);
+	
+	
+	float dist = (float)border_dist / 100;
+	int offset = border_offset;
+	
+	// TOP: y = 0;
+	dist = 0.02;
+	offset = 64;
+	for (unsigned x = 0; x < cloud->width; x++)
+	{
+		int y = offset;
+		const pcl::PointXYZRGB &pt = cloud->points[y * cloud->width + x];
 
+		cv::Point3f p(pt.x, pt.y, pt.z);
+		std::vector<int> points = getNearestNeigboursInRadius(kdtree, dist, p);
+		result.insert( result.end(), points.begin(), points.end() );
+		
+	}
+	
+	// RIGHT: x = cloud->width;
+	dist = 0.02;
+	offset = 68;
+	for (unsigned y = 0; y < cloud->height; y++)
+	{
+		int x = cloud->width - offset;
+		const pcl::PointXYZRGB &pt = cloud->points[y * cloud->width + x];
+
+		cv::Point3f p(pt.x, pt.y, pt.z);
+		std::vector<int> points = getNearestNeigboursInRadius(kdtree, dist, p);
+		result.insert( result.end(), points.begin(), points.end() );	
+	}
+	
+	
+	// BOTTOM: y = cloud->height;
+	dist = 0.02;
+	offset = 6;
+	for (unsigned x = 0; x < cloud->width; x++)
+	{
+		int y = cloud->height-offset;
+		const pcl::PointXYZRGB &pt = cloud->points[y * cloud->width + x];
+
+		cv::Point3f p(pt.x, pt.y, pt.z);
+		std::vector<int> points = getNearestNeigboursInRadius(kdtree, dist, p);
+		result.insert( result.end(), points.begin(), points.end() );	
+		
+	}
+	
+	// LEFT: x = 0;
+	dist = 0.02;
+	offset = 7;
+	for (unsigned y = 0; y < cloud->height; y++)
+	{
+		int x = offset;
+		const pcl::PointXYZRGB &pt = cloud->points[y * cloud->width + x];
+
+		cv::Point3f p(pt.x, pt.y, pt.z);
+		std::vector<int> points = getNearestNeigboursInRadius(kdtree, dist, p);
+		result.insert( result.end(), points.begin(), points.end() );	
+	}
+	
+	
+	
+	return result;
+}
+
+
+// sorted array of border points
+cv::Point3f getOrigin(PointCloud<PointXYZRGB>::Ptr& filtered_cloud, std::vector<int> border_points)
+{
+	std::map<int, std::vector<cv::Point3f> > clusters;
+	cv::Point3f last;
+	// cluster points and give biggest cluster back
+	for (int i = 0; i < border_points.size(); i++)
+	{
+		pcl::PointXYZRGB& pt = filtered_cloud->points[ border_points[i] ];
+		cv::Point3f p(pt.x, pt.y, pt.z);
+		
+		if (clusters.size() == 0)
+		{
+			clusters[0].push_back( p );
+			last = p;
+			continue;
+		}
+		
+		float dist = sqrt( pow(p.x - last.x, 2) + pow(p.y - last.y, 2) + pow(p.z - last.z, 2) );
+		
+		
+		if (dist < 0.2)
+		{
+			clusters[clusters.size() - 1].push_back( p );
+		}
+		else
+		{
+			clusters[clusters.size()].push_back( p );
+		}
+		
+		last = p;
+	}
+	
+	// check for circle
+	if (clusters.size() > 1)
+	{
+		// check last point if he is in range of first point
+		cv::Point3f first = clusters[0][0];
+		last = clusters[clusters.size() - 1][ clusters[clusters.size() - 1].size() - 1 ];
+		float dist = sqrt( pow(first.x - last.x, 2) + pow(first.y - last.y, 2) + pow(first.z - last.z, 2) );
+		
+		if (dist < 0.2 )
+		{
+			// merge first and last cluster
+			clusters[clusters.size() - 1].insert( clusters[clusters.size() - 1].end(), clusters[0].begin(), clusters[0].end() );
+		}
+	}
+	
+	int cluster_index = 0;
+	int max_points = 0;
+	
+	// get cluster with max size
+	for (int i = 0; i < clusters.size(); i++)
+	{
+		if (clusters[i].size() > max_points)
+		{
+			max_points = clusters[i].size();
+			cluster_index = i;
+		}
+	}
+
+	cv::Point3f result; 
+	
+	// get the median point of the biggest cluster
+	if (clusters.size() > 0)
+	{
+		result = clusters[cluster_index][ clusters[cluster_index].size() / 2 ];
+	}
+	else
+	{
+		DEBUG(1, cout << "getOrigin: ERROR no Point found" << endl);
+	}
+
+	return result;
+}
 
 /*********************************************************************
  * This function removes the hand from the image
@@ -1642,6 +1913,44 @@ bool lexico_compare3f(const cv::Point3f& p1, const cv::Point3f& p2) {
 
 bool points_are_equal3f(const cv::Point3f& p1, const cv::Point3f& p2) {
    return ((p1.x == p2.x) && (p1.y == p2.y) && (p1.z == p2.z));
+}
+
+
+// read files from folder
+void callbackFromFolder(const char* folder)
+{
+	path p (folder);
+
+	directory_iterator end_itr;
+
+	// cycle through the directory
+	for (directory_iterator itr(p); itr != end_itr; ++itr)
+	{
+		//cout << itr->path() << endl;
+		// If it's not a directory, list it. If you want to list directories too, just remove this check.
+		if (is_regular_file(itr->path())) 
+		{
+		    // assign current file name to current_file and echo it out to the console.
+		    string current_file = itr->path().string();
+		    
+		    if( boost::algorithm::ends_with(current_file, ".pcd") )
+		    {
+		    	pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud (new pcl::PointCloud<pcl::PointXYZRGB>);
+
+			if (pcl::io::loadPCDFile<pcl::PointXYZRGB> (current_file, *cloud) == -1) //* load the file
+			{
+				cout <<  "Couldn't read file " << current_file << endl;
+				return;
+			}
+			
+			pcl::PointCloud<pcl::PointXYZRGBA>::Ptr cloud2 (new pcl::PointCloud<pcl::PointXYZRGBA>);
+			pcl::copyPointCloud<pcl::PointXYZRGB, pcl::PointXYZRGBA>(*cloud, *cloud2);
+		    	grabberCallback(cloud2);
+		    }
+		    	
+		}
+	}
+
 }
 
 
