@@ -7,7 +7,10 @@
 #include <opencv2/imgproc/imgproc.hpp>
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/objdetect/objdetect.hpp>
+#include <math.h>
+#include <stdint.h>
 
+#define PI 3.14159265
 
 using namespace cv;
 using namespace std;
@@ -16,6 +19,7 @@ class FaceDetection
 {
 		private:
 				Mat _image;
+				Mat _face;
 				std::vector< cv::Vec3b > _skin_points;
 				CascadeClassifier face_cascade;
 				CascadeClassifier eyes_cascade;
@@ -28,6 +32,7 @@ class FaceDetection
 				bool detectFace();
 				void calcHistogram();
 				std::vector< cv::Vec3b > getSkinPoints();
+				std::vector<cv::Point3f> getHsvCylinder();
 
 };
 

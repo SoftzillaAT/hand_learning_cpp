@@ -17,6 +17,7 @@ void FaceDetection::showResult()
 
 bool FaceDetection::detectFace()
 {
+	_face.release();
 				//-- 1. Load the cascades
 				if( !face_cascade.load( face_cascade_name ) )
 				{ 
@@ -42,6 +43,14 @@ bool FaceDetection::detectFace()
 
 				for( size_t i = 0; i < faces.size(); i++ )
 				{
+								faces[i].x = faces[i].x + faces[i].width * 0.1;
+								faces[i].width = faces[i].width*0.8;
+								faces[i].y = faces[i].y + faces[i].height * 0.05;
+								faces[i].height = faces[i].height*0.9;
+								_face = _image( faces[i] );
+								
+								cv::imshow("FaceROI", _face);
+
 								Point center( faces[i].x + faces[i].width*0.5, 
 																faces[i].y + faces[i].height*0.5 );
 
@@ -49,9 +58,10 @@ bool FaceDetection::detectFace()
 																				faces[i].height*0.5), 0, 0, 360, 
 																Scalar( 255, 0, 255 ), 4, 8, 0 );
 
-								Mat faceROI = frame_gray( faces[i] );
+								// skip other faces and eye detection
+								break;
+								Mat faceROI = frame_gray ( faces[i] );
 								std::vector<Rect> eyes;
-
 								//-- In each face, detect eyes
 								eyes_cascade.detectMultiScale( faceROI, eyes, 1.1, 2, 
 																0 |CV_HAAR_SCALE_IMAGE, Size(30, 30) );
@@ -64,8 +74,8 @@ bool FaceDetection::detectFace()
 												circle( _image, center, radius, Scalar( 255, 0, 0 ), 4, 8, 0 );
 								}
 				}
-
-				return true;
+				
+				return !_face.empty();
 }
 
 void FaceDetection::calcHistogram()
@@ -119,8 +129,45 @@ void FaceDetection::calcHistogram()
 
 std::vector< cv::Vec3b > FaceDetection::getSkinPoints()
 {
-//	cv::kmeans(points, 2, labels, cv::TermCriteria( cv::TermCriteria::EPS+cv::TermCriteria::COUNT, 10, 1.0), 3, cv::KMEANS_PP_CENTERS, centers);
+	_skin_points.clear();
+				if (!_face.empty())
+				{
+								// convert to hsv
+								Mat hsv_face;
+								cv::cvtColor(_face, hsv_face, CV_BGR2HSV);
+								for (int x = 0; x < hsv_face.rows; x++)
+								{
+												for (int y = 0; y < hsv_face.cols; y++)
+												{
+																_skin_points.push_back( hsv_face.at<cv::Vec3b>(x,y) );
+												}
+								}
+				}
+
 				return _skin_points;
+}
+
+std::vector<cv::Point3f> FaceDetection::getHsvCylinder()
+{
+	std::vector<cv::Point3f> result;
+
+	std::vector<cv::Vec3b> points = getSkinPoints();
+
+	for (int i = 0; i < points.size(); i++)
+	{
+		uint8_t h = points[i][0];
+		uint8_t s = points[i][1];
+		uint8_t v = points[i][2];
+
+		float alpha = (float)h/90.0 * M_PI;
+		float x = cos(alpha) * s;
+		float y = sin(alpha) * s;
+		float z = v;
+		Point3f p(x,y,z);
+		result.push_back(p);
+	}
+
+	return result;
 }
 
 
