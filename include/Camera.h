@@ -26,6 +26,10 @@ class Camera
 		bool init_camera;
 		void calculateCameraSettings(PointCloud<PointXYZRGB>::Ptr& cloud);
 		std::vector<Point2f> projectPoints(std::vector<Point3f> points);
+		void convertImage(const pcl::PointCloud<pcl::PointXYZRGB> &cloud, cv::Mat &image);
+		void convertImage(const pcl::PointCloud<pcl::PointXYZRGBA> &_cloud, cv::Mat &_image);
+		void convertImage(const pcl::PointCloud<pcl::PointXYZRGBNormal> &_cloud, cv::Mat &_image);
+		void convertImage(const pcl::PointCloud<pcl::PointXYZRGB> &_cloud, cv::Mat &_image, int width, int height, int radius);
 };
 
 

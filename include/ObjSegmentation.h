@@ -33,6 +33,7 @@ class ObjSegmentation
 				void clusterObject(PointCloud<PointXYZRGB>::Ptr& cloud, PointCloud<PointXYZRGB>::Ptr& cluster, cv::Point3f point);
 				cv::Point2d getNearestPoint(PointCloud<PointXYZRGB>::Ptr& cloud);
 				Mat skin_mask;
+				Mat obj_mask;
 
 };
 

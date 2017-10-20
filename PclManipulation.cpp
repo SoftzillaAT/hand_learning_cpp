@@ -282,9 +282,9 @@ void PclManipulation::clusterCloud2(PointCloud<PointXYZRGB>::Ptr& cloud, PointCl
 				pcl::VoxelGrid<pcl::PointXYZRGB> vg;
 
 				vg.setInputCloud (cloud_filtered);
-				vg.setLeafSize (0.04f, 0.04f, 0.04f);
+				vg.setLeafSize (0.03f, 0.03f, 0.03f);
 				vg.filter (*cloud_filtered);
-				std::cout << "PointCloud after filtering has: " << cloud_filtered->points.size ()  << " data points." << std::endl; //*
+				//std::cout << "PointCloud after filtering has: " << cloud_filtered->points.size ()  << " data points." << std::endl; //*
 
 			
 				// Creating the KdTree object for the search method of the extraction
@@ -294,7 +294,7 @@ void PclManipulation::clusterCloud2(PointCloud<PointXYZRGB>::Ptr& cloud, PointCl
 				std::vector<pcl::PointIndices> cluster_indices;
 				pcl::EuclideanClusterExtraction<pcl::PointXYZRGB> ec;
 				ec.setClusterTolerance (0.05); // 5cm
-				ec.setMinClusterSize (20);
+				ec.setMinClusterSize (5);
 				ec.setMaxClusterSize (2500000);
 				ec.setSearchMethod (tree);
 				ec.setInputCloud (cloud_filtered);
@@ -367,7 +367,7 @@ void PclManipulation::clusterCloud2(PointCloud<PointXYZRGB>::Ptr& cloud, PointCl
 								}
 
 								cloud_result->width = cloud_result->points.size ();
-								cout << "CLOUD CLUSTERED " << cloud_result->points.size() << endl;
+								//cout << "CLOUD CLUSTERED " << cloud_result->points.size() << endl;
 								cloud_result->height = 1;
 								cloud_result->is_dense = true;
 				}

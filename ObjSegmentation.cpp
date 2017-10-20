@@ -10,7 +10,7 @@ ObjSegmentation::ObjSegmentation(Mat image, Camera cam)
 void ObjSegmentation::grabCut(Mat mask)
 {
 
-	cv::Rect rectangle(151 ,229 ,170, 130);
+	cv::Rect rectangle;
 
 	cv::Mat result = mask; // segmentation result (4 possible values)
 	cv::Mat bgModel,fgModel; // the models (internally used)
@@ -26,7 +26,7 @@ void ObjSegmentation::grabCut(Mat mask)
 	cv::compare(result, cv::GC_PR_FGD, result, cv::CMP_EQ);
 	cv::Mat foreground(_image.size(),CV_8UC3,cv::Scalar(255,255,255));
 	_image.copyTo(foreground, result); // bg pixels not copied
-
+	obj_mask = ~result;
 	imshow("Segmentation", foreground);
 }
 
@@ -57,7 +57,7 @@ void ObjSegmentation::setSkinMask(std::vector<cv::Vec3b> ref_pixels, uint8_t h_r
 		//cv::Scalar low(0,10,50);
 		//cv::Scalar high(170, 50, 100);
 		
-		cout << "Low: " << low << " | High: " << high << endl;
+		//cout << "Low: " << low << " | High: " << high << endl;
 		Mat mask;
 		
 		cv::inRange(image_hsv, low, high, mask);
@@ -166,16 +166,20 @@ void ObjSegmentation::applyHystereses(cv::Mat image_hsv, float max_dist)
 
 void ObjSegmentation::clusterObject(PointCloud<PointXYZRGB>::Ptr& cloud, PointCloud<PointXYZRGB>::Ptr& cluster, cv::Point3f point)
 {
+				pcl::PointCloud<pcl::PointXYZRGB>::Ptr tmp_cloud (new pcl::PointCloud<pcl::PointXYZRGB>);
+
+				pcl::copyPointCloud<pcl::PointXYZRGB, pcl::PointXYZRGB>(*cloud, *tmp_cloud);
+
 				// cluster the object
 				// closing on mask
 				Mat closing_mask;
 				Mat kernel = Mat::ones(15,15,CV_8UC1);
 				cv::morphologyEx( skin_mask, closing_mask, 3, kernel );
-				cv::imshow("closing", closing_mask);
+				//cv::imshow("closing", closing_mask);
 
 				Mat skin_result;
 				_image.copyTo(skin_result, ~closing_mask);
-				cv::imshow("Skin result after closing", skin_result);
+				//cv::imshow("Skin result after closing", skin_result);
 				
 				// first dilating on mask
 				Mat output_mask = closing_mask;
@@ -183,12 +187,16 @@ void ObjSegmentation::clusterObject(PointCloud<PointXYZRGB>::Ptr& cloud, PointCl
 				cv::dilate(output_mask, output_mask, kernel);
 				//cv::erode(skin_mask, output_mask, kernel);
 				//skin_mask = output_mask;
-				cv::imshow("dilating", output_mask);
+				//cv::imshow("dilating", output_mask);
 
-				applyMask(cloud, closing_mask);
+				applyMask(tmp_cloud, closing_mask);
 				cv::Point2d nearest_point = getNearestPoint(cloud);	
 				//PclManipulation::clusterCloud(cloud, nearest_point);
-				PclManipulation::clusterCloud2(cloud, cluster);
+				PclManipulation::clusterCloud2(tmp_cloud, cluster);
+
+				Mat image;
+				_cam.convertImage(*cluster, image, cloud->width, cloud->height, 8); 
+				imshow("Clusterd cloud", image);
 
 				std::vector<cv::Point3f> points;
 
@@ -216,7 +224,7 @@ void ObjSegmentation::clusterObject(PointCloud<PointXYZRGB>::Ptr& cloud, PointCl
 				drawContours( mask, contours, -1, color, CV_FILLED, 8, vector<Vec4i>(), 0, Point() );
 				//cv::imshow("hull",mask);
 
-				kernel = Mat::ones(31,31, CV_8UC1);
+				kernel = Mat::ones(69,69, CV_8UC1);
 				cv::dilate(mask, output_mask, kernel);
 				//cv::imshow("hull_dil",output_mask);
 				//cv::imshow("skin_mask", skin_mask);
@@ -226,7 +234,7 @@ void ObjSegmentation::clusterObject(PointCloud<PointXYZRGB>::Ptr& cloud, PointCl
 
 				grab_mask = ~grab_mask;
 				//grab_mask = output_mask;
-				cv::imshow("hull_dill_combined", grab_mask);
+				//cv::imshow("hull_dill_combined", grab_mask);
 				//cout << "MASK: " << endl << mask << endl;
 
 				cv::Mat foreground(_image.size(),CV_8UC3,cv::Scalar(255,255,255));
@@ -236,6 +244,7 @@ void ObjSegmentation::clusterObject(PointCloud<PointXYZRGB>::Ptr& cloud, PointCl
 
 				grab_mask.setTo(GC_PR_FGD, grab_mask == 255); 
 				grabCut(grab_mask);
+				applyMask(cloud, obj_mask);
 
 }
 
