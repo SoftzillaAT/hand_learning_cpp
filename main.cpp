@@ -11,23 +11,6 @@
 
 #include <iostream>
 #include <boost/foreach.hpp>
-#include <pcl_conversions/pcl_conversions.h>
-
-#include <pcl/ModelCoefficients.h>
-#include <pcl/point_types.h>
-#include <pcl/filters/extract_indices.h>
-#include <pcl/filters/voxel_grid.h>
-#include <pcl/features/normal_3d.h>
-#include <pcl/kdtree/kdtree.h>
-#include <pcl/sample_consensus/method_types.h>
-#include <pcl/sample_consensus/model_types.h>
-#include <pcl/segmentation/sac_segmentation.h>
-#include <pcl/segmentation/extract_clusters.h>
-#include <pcl/segmentation/region_growing_rgb.h>
-#include <pcl/filters/passthrough.h>
-#include <pcl/visualization/cloud_viewer.h>
-#include <pcl/common/centroid.h>
-
 
 #include "boost/filesystem.hpp"
 #include "FaceDetection.h"
@@ -37,17 +20,6 @@
 
 #include <cv.h>
 #include <highgui.h>
-#include <opencv2/calib3d/calib3d.hpp>
-#include <pcl/filters/statistical_outlier_removal.h>
-#include <pcl/segmentation/min_cut_segmentation.h>
-
-#include <utility>                   // for std::pair
-#include <algorithm>                 // for std::for_each
-#include <boost/graph/graph_traits.hpp>
-#include <boost/graph/astar_search.hpp>
-#include <boost/graph/adjacency_list.hpp>
-#include <boost/graph/dijkstra_shortest_paths.hpp>
-#include <pcl/kdtree/kdtree_flann.h>
 
 /* Includes of Hannes */
 #include <opencv2/core/core.hpp>
@@ -109,7 +81,6 @@ cv::Point3f getPOI(PointCloud<PointXYZRGB>::Ptr&);
 
 void drawCoordinateSystem(cv::Mat &im, const Eigen::Matrix4f &pose, const cv::Mat_<double> &intrinsic, const cv::Mat_<double> &dist_coeffs, double size, int thickness);
 void drawConfidenceBar(cv::Mat &im, const double &conf, int x_start=50, int x_end=200, int y=30);
-void drawCircle(cv::Mat &img, cv::Point3f center, int radius, cv::Scalar color, int thickness);
 
 bool lexico_compare2f(const cv::Point2f& p1, const cv::Point2f& p2);
 bool points_are_equal2f(const cv::Point2f& p1, const cv::Point2f& p2);
@@ -196,14 +167,17 @@ int border_dist=3;
 int border_offset=3;
 
 // hysterese params
-int hyst_dist=0;
+int hyst_dist=8;
 
 // skin params
-int h_range = 4;
-int s_range = 25;
-int v_range = 50;
+int h_range = 3;
+int s_range = 10;
+int v_range = 10;
 
-cv::Vec3b skin_color;
+// Cluster params
+int useGrabCut = 0;
+
+std::vector<cv::Vec3b> skin_points;
 
 /*********************************************************************
  * Main entrypoint of the program
@@ -259,7 +233,7 @@ int main(int argc, char** argv)
 	cv::createTrackbar("s range", "trackbars", &v_range, 255);
 	cv::createTrackbar("v range", "trackbars", &s_range, 255);
 	cv::createTrackbar("Hysterese dist", "trackbars", &hyst_dist, 200);
-	//cv::createTrackbar("Hysterese dist 2", "trackbars", &hyst_dist2, 200);
+	cv::createTrackbar("Use grabCut", "trackbars", &useGrabCut, 1);
 	
 
 	while(!stopCamera)
@@ -334,131 +308,126 @@ void grabberCallback(const PointCloud<PointXYZRGBA>::ConstPtr& cloud)
 	
 	
 	
-	
-	cam.convertImage(*mycloud, image, mycloud->width, mycloud->height, 0);
-    	image.copyTo(im_draw);
-    	cv::imshow("orig",im_draw);
-	
-	int key= cv::waitKey(10);
-	if (mode == capture)
-	{
-		DEBUG(2, cout << "Mode Capture" << endl);
-		cam.convertImage(*mycloud, image);
-		FaceDetection face(image);
-		
-		if(face.detectFace())
-		{
-			face.showResult();
-		}
-		else
-		{
-			cout << "Unable to detect face" << endl;
-		}
-		
-		// if user hits 'space'
-		if (((char)key) == 32)
-		{
-			DEBUG(1, cout << "Calibration..." << endl);
-			mode = calibration;
-		}
-	}
 
-	if (mode == calibration)
-	{
-					FaceDetection face(image);
-					// Detect face for tracking
-					if (face.detectFace())
-					{
-									face.showResult();
-									// get color from skin
-									std::vector<Point3f> skin_points = face.getHsvCylinder();
-									pcl::PointCloud<PointXYZRGB>::Ptr skin_cloud = PclManipulation::createCloud(skin_points);
-									std::vector<Point3f> skin_clusters = PclManipulation::calcMeanShiftPoints(skin_cloud, 20, 50);
-									Point3f biggest_cluster = PclManipulation::getClusterPoint(skin_clusters, 20);
-									float s = sqrt(pow(biggest_cluster.x,2) + pow(biggest_cluster.y,2));
-									float alpha = asin(biggest_cluster.y / s);
-									float h = alpha * 90 / M_PI;
-									float v = biggest_cluster.z;
-									skin_color = Vec3b((uint8_t)round(h), (uint8_t)round(s), (uint8_t)round(v));
+  cam.convertImage(*mycloud, image, mycloud->width, mycloud->height, 0);
+  image.copyTo(im_draw);
+  cv::imshow("orig",im_draw);
 
-									cout << "FOUND COLOR: " << skin_color << endl;
+  DEBUG(2, cout << "Mode Capture" << endl);
+  cam.convertImage(*mycloud, image);
+  FaceDetection face(image);
 
+  int key= cv::waitKey(10);
+  if (mode == capture)
+  {
 
-									mode = tracking;
-					}
-	}
+    if(face.detectFace())
+    {
+      face.showResult();
+    }
+    else
+    {
+      cout << "Unable to detect face" << endl;
+    }
 
-	if (mode == tracking)
-	{
-					DEBUG(2, cout << "Mode tracking" << endl);
+    // if user hits 'space'
+    if (((char)key) == 32)
+    {
+      DEBUG(1, cout << "Calibration..." << endl);
+      mode = calibration;
+    }
+  }
 
-					//cv::Point3f nearest_point = getPOI(mycloud);
+  if (mode == calibration)
+  {
+    // Detect face for tracking
+    if (face.detectFace())
+    {
+      face.showResult();
+      // get color from skin
+      skin_points = face.getSkinPoints();
+      cout << "FOUND COLORS: " << skin_points[0] << endl;
 
-					cam.convertImage(*mycloud, image);
-					ObjSegmentation seg(image, cam);
-					std::vector<cv::Vec3b> ref_pixels;
-					ref_pixels.push_back(skin_color);
-					seg.setSkinMask(ref_pixels, h_range, s_range, v_range, hyst_dist);
+      //skin_points.push_back(cv::Vec3b(178,114,146));
+      //skin_points.push_back(cv::Vec3b(4,121,129));
+      mode = tracking;
+    }
+    else
+    {
+      cout << "Unable to detect face" << endl;
+    }
+  }
 
-					start = clock();
-					//cout << "Start Segmentation" << endl;
+  if (mode == tracking)
+  {
+    DEBUG(2, cout << "Mode tracking" << endl);
+
+    start = clock();
+    //cv::Point3f nearest_point = getPOI(mycloud);
+
+    cam.convertImage(*mycloud, image);
+    ObjSegmentation seg(image, cam);
+    seg.setSkinMask(skin_points, h_range, s_range, v_range, hyst_dist);
+
+    //cout << "Start Segmentation" << endl;
 
 
 
-					pcl::PointCloud<pcl::PointXYZRGB>::Ptr result_cluster (new pcl::PointCloud<pcl::PointXYZRGB>);
-					seg.clusterObject(mycloud, result_cluster, min_point);
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr result_cluster (new pcl::PointCloud<pcl::PointXYZRGB>);
+    seg.useGrabCut = (bool)useGrabCut;
+    seg.clusterObject(mycloud);
 
-					end = clock();
-					DEBUG(0, cout << "Time required for clustering: "<< (double)(end-start)/CLOCKS_PER_SEC << " seconds." << "\n\n");
+    end = clock();
+    DEBUG(0, cout << "Time required for segmentation: "<< (double)(end-start)/CLOCKS_PER_SEC << " seconds." << "\n\n");
 
-					//seg.applyMask(mycloud);
-					//cv::Point3f p = seg.getNearestPoint(mycloud);
+    //seg.applyMask(mycloud);
+    //cv::Point3f p = seg.getNearestPoint(mycloud);
 
-					cam.convertImage(*mycloud, image);
-					image.copyTo(im_draw);
-					cv::imshow("image",im_draw);
+    cam.convertImage(*mycloud, image);
+    image.copyTo(im_draw);
+    cv::imshow("image",im_draw);
 
-					//mode = capture;
+    //mode = capture;
 
-					//trackImage(mycloud);
-					if (lost_pose_counter >= max_loose_pose)
-					{
-									mode = stop;
-					}
+    //trackImage(mycloud);
+    if (lost_pose_counter >= max_loose_pose)
+    {
+      mode = stop;
+    }
 
-	}
+  }
 
-	if (mode == stop)
-	{
-					DEBUG(2, cout << "Mode stop" << endl);
-					stopCamera = true;
-					return;
-	}
+  if (mode == stop)
+  {
+    DEBUG(2, cout << "Mode stop" << endl);
+    stopCamera = true;
+    return;
+  }
 
 
-	// If user hits 'ESC'
-	if (((char)key) == 27)
-	{
-					stopCamera = true;
-	}
+  // If user hits 'ESC'
+  if (((char)key) == 27)
+  {
+    stopCamera = true;
+  }
 
-	if (((char)key) == 's')
-	{
-					stringstream stream;
-					stream << "inputCloud" << filesSaved << ".pcd";
-					string filename = stream.str();
-					if (io::savePCDFile(filename, *mycloud, true) == 0)
-					{
-									filesSaved++;
-									cout << "Saved " << filename << "." << endl;
-					}
-					else PCL_ERROR("Problem saving %s.\n", filename.c_str());
-					cam.convertImage(*mycloud, image);
-					imwrite( filename + ".jpg", image );
-	}
+  if (((char)key) == 's')
+  {
+    stringstream stream;
+    stream << "inputCloud" << filesSaved << ".pcd";
+    string filename = stream.str();
+    if (io::savePCDFile(filename, *mycloud, true) == 0)
+    {
+      filesSaved++;
+      cout << "Saved " << filename << "." << endl;
+    }
+    else PCL_ERROR("Problem saving %s.\n", filename.c_str());
+    cam.convertImage(*mycloud, image);
+    imwrite( filename + ".jpg", image );
+  }
 
-	gend = clock();
-	DEBUG(2, cout << "Time required for CB: "<< (double)(gend-gstart)/CLOCKS_PER_SEC << " seconds." << "\n\n");
+  gend = clock();
+  DEBUG(2, cout << "Time required for CB: "<< (double)(gend-gstart)/CLOCKS_PER_SEC << " seconds." << "\n\n");
 
 }
 
@@ -470,43 +439,43 @@ void grabberCallback(const PointCloud<PointXYZRGBA>::ConstPtr& cloud)
  ********************************************************************/
 cv::Point3f getPOI(PointCloud<PointXYZRGB>::Ptr& cloud)
 {
-				float minz = 10000;
-				int cnt_bad_point = 0;
-				BOOST_FOREACH (pcl::PointXYZRGB& pt, cloud->points)
-				{
-								if (pt.z != pt.z || pt.x != pt.x || pt.y != pt.y)
-								{
-												//pt.r = 0;
-												//pt.g = 0;
-												//pt.b = 0;
-												cnt_bad_point++;
+  float minz = 10000;
+  int cnt_bad_point = 0;
+  BOOST_FOREACH (pcl::PointXYZRGB& pt, cloud->points)
+  {
+    if (pt.z != pt.z || pt.x != pt.x || pt.y != pt.y)
+    {
+      //pt.r = 0;
+      //pt.g = 0;
+      //pt.b = 0;
+      cnt_bad_point++;
 
-								}
-								/*	
-										if(pt.z > float(max_camera_distance) / 100)
-										{
-										pt.x = bad_point;
-										pt.y = bad_point;
-										pt.z = bad_point;
-										pt.r = 0;
-										pt.g = 0;
-										pt.b = 0;
-										}*/
+    }
+    /*	
+        if(pt.z > float(max_camera_distance) / 100)
+        {
+        pt.x = bad_point;
+        pt.y = bad_point;
+        pt.z = bad_point;
+        pt.r = 0;
+        pt.g = 0;
+        pt.b = 0;
+        }*/
 
-								if (pt.z < minz)
-								{
-												minz = pt.z;
-												min_point.x = pt.x;
-												min_point.y = pt.y;
-												min_point.z = pt.z;
-								}
+    if (pt.z < minz)
+    {
+      minz = pt.z;
+      min_point.x = pt.x;
+      min_point.y = pt.y;
+      min_point.z = pt.z;
+    }
 
-								//printf ("\t(%f, %f, %f, %d, %d, %d)\n", pt.x, pt.y, pt.z, pt.r, pt.g, pt.b);
+    //printf ("\t(%f, %f, %f, %d, %d, %d)\n", pt.x, pt.y, pt.z, pt.r, pt.g, pt.b);
 
-				}
+  }
 
-				float error_value = (float)cnt_bad_point / cloud->points.size();
-				view_error = (minz < (float)min_camera_distance / 100) || (error_value > 0.3);
+  float error_value = (float)cnt_bad_point / cloud->points.size();
+  view_error = (minz < (float)min_camera_distance / 100) || (error_value > 0.3);
 }
 
 
@@ -519,55 +488,55 @@ cv::Point3f getPOI(PointCloud<PointXYZRGB>::Ptr& cloud)
  ********************************************************************/
 void trackImage(const PointCloud<PointXYZRGB>::ConstPtr& cloud)
 {
-				cout<<"---------------- FRAME #"<<i<<" -----------------------"<<endl;
+  cout<<"---------------- FRAME #"<<i<<" -----------------------"<<endl;
 
-				cam.convertImage(*cloud, image);
-				image.copyTo(im_draw);
+  cam.convertImage(*cloud, image);
+  image.copyTo(im_draw);
 
-				tsf.setDebugImage(im_draw);
+  tsf.setDebugImage(im_draw);
 
-				// track
-				{ pcl::ScopeTime t("overall time");
-								have_pose = tsf.track(*cloud, i, pose, conf_ransac_iter, conf_tracked_points);
-								mytime = t.getTime();
-				} //-- overall time --
+  // track
+  { pcl::ScopeTime t("overall time");
+    have_pose = tsf.track(*cloud, i, pose, conf_ransac_iter, conf_tracked_points);
+    mytime = t.getTime();
+  } //-- overall time --
 
-				// ---- END batch filtering ---
+  // ---- END batch filtering ---
 
-				DEBUG(1, cout<<"conf (ransac, tracked points): "<<conf_ransac_iter<<", "<<conf_tracked_points<<endl);
-				if (!have_pose) 
-				{
-								lost_pose_counter++;
-								cout<<"############################ Lost pose: " << lost_pose_counter << "  #############################" << endl;
-				}
-				else
-				{
-								lost_pose_counter = 0;
-				}
-				all_poses.push_back(std::make_pair(pose,-1));
-				v4r::invPose(pose, inv_pose);
+  DEBUG(1, cout<<"conf (ransac, tracked points): "<<conf_ransac_iter<<", "<<conf_tracked_points<<endl);
+  if (!have_pose) 
+  {
+    lost_pose_counter++;
+    cout<<"############################ Lost pose: " << lost_pose_counter << "  #############################" << endl;
+  }
+  else
+  {
+    lost_pose_counter = 0;
+  }
+  all_poses.push_back(std::make_pair(pose,-1));
+  v4r::invPose(pose, inv_pose);
 
-				// get filtered frame
-				tsf.getFilteredCloudNormals(filt_cloud, filt_pose, timestamp);
+  // get filtered frame
+  tsf.getFilteredCloudNormals(filt_cloud, filt_pose, timestamp);
 
-				mean_time += mytime;
-				cnt_time++;
-				DEBUG(1, cout<<"mean="<<mean_time/double(cnt_time)<<"ms ("<<1000./(mean_time/double(cnt_time))<<"fps)"<<endl);
-				DEBUG(1, cout<<"timestamp (c/f): "<<i<<"/"<<timestamp<<endl);
+  mean_time += mytime;
+  cnt_time++;
+  DEBUG(1, cout<<"mean="<<mean_time/double(cnt_time)<<"ms ("<<1000./(mean_time/double(cnt_time))<<"fps)"<<endl);
+  DEBUG(1, cout<<"timestamp (c/f): "<<i<<"/"<<timestamp<<endl);
 
-				// debug out draw
-				if (display)
-				{
-								drawConfidenceBar(im_draw, conf_ransac_iter, 50, 200, 30);
-								drawConfidenceBar(im_draw, conf_tracked_points, 50, 200, 50);
-								cv::imshow("image",im_draw);
+  // debug out draw
+  if (display)
+  {
+    drawConfidenceBar(im_draw, conf_ransac_iter, 50, 200, 30);
+    drawConfidenceBar(im_draw, conf_tracked_points, 50, 200, 50);
+    cv::imshow("image",im_draw);
 
-								//if (conf_ransac_iter<0.2) cv::waitKey(0); // Not sure what this do
-				}
-				else usleep(50000);
+    //if (conf_ransac_iter<0.2) cv::waitKey(0); // Not sure what this do
+  }
+  else usleep(50000);
 
-				// Increment index for tracking
-				i++;
+  // Increment index for tracking
+  i++;
 }
 
 
@@ -576,35 +545,35 @@ void trackImage(const PointCloud<PointXYZRGB>::ConstPtr& cloud)
  ********************************************************************/
 void initTracker()
 {
-				DEBUG(1, cout << "Init Tracker..." << endl);
-				mean_time = 0;
-				cnt_time = 0;
-				lost_pose_counter = 0;
+  DEBUG(1, cout << "Init Tracker..." << endl);
+  mean_time = 0;
+  cnt_time = 0;
+  lost_pose_counter = 0;
 
-				// configure camera tracking, temporal smothing and mapping
-				tsf.setCameraParameter(intrinsic);
-				tsf.setCameraParameterTSF(intrinsic, 640, 480);
+  // configure camera tracking, temporal smothing and mapping
+  tsf.setCameraParameter(intrinsic);
+  tsf.setCameraParameterTSF(intrinsic, 640, 480);
 
-				v4r::TSFVisualSLAM::Parameter param;
-				param.map_param.refine_plk = true;
-				param.map_param.detect_loops = true;
-				param.map_param.ba.depth_error_scale = 100;
-				param.filt_param.batch_size_clouds = 20;
-				param.diff_cam_distance_map = 0.2;
-				param.diff_delta_angle_map = 3;
-				param.filt_param.type = 3;  //0...ori. col., 1..col mean, 2..bilin., 3..bilin col and depth with cut off thr
-				param.map_param.ba.optimize_delta_cloud_rgb_pose_global = false;
-				param.map_param.ba.optimize_delta_cloud_rgb_pose = false;
-				tsf.setParameter(param);
+  v4r::TSFVisualSLAM::Parameter param;
+  param.map_param.refine_plk = true;
+  param.map_param.detect_loops = true;
+  param.map_param.ba.depth_error_scale = 100;
+  param.filt_param.batch_size_clouds = 20;
+  param.diff_cam_distance_map = 0.2;
+  param.diff_delta_angle_map = 3;
+  param.filt_param.type = 3;  //0...ori. col., 1..col mean, 2..bilin., 3..bilin col and depth with cut off thr
+  param.map_param.ba.optimize_delta_cloud_rgb_pose_global = false;
+  param.map_param.ba.optimize_delta_cloud_rgb_pose = false;
+  tsf.setParameter(param);
 
-				v4r::FeatureDetector::Ptr detector(new v4r::FeatureDetector_KD_FAST_IMGD());
-				tsf.setDetectors(detector, detector);
+  v4r::FeatureDetector::Ptr detector(new v4r::FeatureDetector_KD_FAST_IMGD());
+  tsf.setDetectors(detector, detector);
 
 
-				conf_ransac_iter = 1;
-				conf_tracked_points = 1;
-				ts_last=0;
-				i = 0;
+  conf_ransac_iter = 1;
+  conf_tracked_points = 1;
+  ts_last=0;
+  i = 0;
 }
 
 /*********************************************************************
@@ -612,40 +581,40 @@ void initTracker()
  ********************************************************************/
 void stopTracker()
 {
-				DEBUG(1, cout << "Stop tracking..." << endl);
-				// optimize map
-				tsf.stop();
-				tsf.optimizeMap();
+  DEBUG(1, cout << "Stop tracking..." << endl);
+  // optimize map
+  tsf.stop();
+  tsf.optimizeMap();
 
-				//tsf.getMap();
-				tsf.getCameraParameter(intrinsic_opti, dist_coeffs_opti);
+  //tsf.getMap();
+  tsf.getCameraParameter(intrinsic_opti, dist_coeffs_opti);
 
-				// create model in global coordinates
-				cout<<"Create pointcloud model..."<<endl;
-				pcl::PointCloud<pcl::PointXYZRGBNormal>::Ptr glob_cloud(new pcl::PointCloud<pcl::PointXYZRGBNormal>());
-				pcl::PolygonMesh mesh;
-				v4r::TSFGlobalCloudFilteringSimple gfilt;
-				v4r::TSFGlobalCloudFilteringSimple::Parameter filt_param;
-				filt_param.filter_largest_cluster = false;
-				filt_param.voxel_size = voxel_size;
-				filt_param.thr_weight = thr_weight;
-				filt_param.thr_delta_angle = thr_delta_angle;
-				filt_param.poisson_depth = poisson_depth;
-				gfilt.setParameter(filt_param);
+  // create model in global coordinates
+  cout<<"Create pointcloud model..."<<endl;
+  pcl::PointCloud<pcl::PointXYZRGBNormal>::Ptr glob_cloud(new pcl::PointCloud<pcl::PointXYZRGBNormal>());
+  pcl::PolygonMesh mesh;
+  v4r::TSFGlobalCloudFilteringSimple gfilt;
+  v4r::TSFGlobalCloudFilteringSimple::Parameter filt_param;
+  filt_param.filter_largest_cluster = false;
+  filt_param.voxel_size = voxel_size;
+  filt_param.thr_weight = thr_weight;
+  filt_param.thr_delta_angle = thr_delta_angle;
+  filt_param.poisson_depth = poisson_depth;
+  gfilt.setParameter(filt_param);
 
-				gfilt.setCameraParameter(intrinsic_opti, dist_coeffs_opti);
-				gfilt.getGlobalCloudFiltered(tsf.getMap(), *glob_cloud);
+  gfilt.setCameraParameter(intrinsic_opti, dist_coeffs_opti);
+  gfilt.getGlobalCloudFiltered(tsf.getMap(), *glob_cloud);
 
-				pcl::copyPointCloud<pcl::PointXYZRGBNormal, pcl::PointXYZRGB>(*glob_cloud, *mycloud);
-				//postProcessing(mycloud);
+  pcl::copyPointCloud<pcl::PointXYZRGBNormal, pcl::PointXYZRGB>(*glob_cloud, *mycloud);
+  //postProcessing(mycloud);
 
-				if (file_cloud.size()>0) pcl::io::savePCDFileBinary(file_cloud, *mycloud);
+  if (file_cloud.size()>0) pcl::io::savePCDFileBinary(file_cloud, *mycloud);
 
-				cout<<"Creat mesh..."<<endl;
-				gfilt.getMesh(glob_cloud, mesh);
+  cout<<"Creat mesh..."<<endl;
+  gfilt.getMesh(glob_cloud, mesh);
 
-				// store resulting files
-				if (file_mesh.size()>0) pcl::io::savePLYFile(file_mesh, mesh);
+  // store resulting files
+  if (file_mesh.size()>0) pcl::io::savePLYFile(file_mesh, mesh);
 }
 
 
@@ -656,34 +625,34 @@ void stopTracker()
  ********************************************************************/
 void drawCoordinateSystem(cv::Mat &im, const Eigen::Matrix4f &_pose, const cv::Mat_<double> &_intrinsic, const cv::Mat_<double> &dist_coeffs, double size, int thickness)
 {
-				Eigen::Matrix3f R = _pose.topLeftCorner<3,3>();
-				Eigen::Vector3f t = _pose.block<3, 1>(0,3);
+  Eigen::Matrix3f R = _pose.topLeftCorner<3,3>();
+  Eigen::Vector3f t = _pose.block<3, 1>(0,3);
 
-				Eigen::Vector3f pt0 = R * Eigen::Vector3f(0,0,0) + t;
-				Eigen::Vector3f pt_x = R * Eigen::Vector3f(size,0,0) + t;
-				Eigen::Vector3f pt_y = R * Eigen::Vector3f(0,size,0) + t;
-				Eigen::Vector3f pt_z = R * Eigen::Vector3f(0,0,size) +t ;
+  Eigen::Vector3f pt0 = R * Eigen::Vector3f(0,0,0) + t;
+  Eigen::Vector3f pt_x = R * Eigen::Vector3f(size,0,0) + t;
+  Eigen::Vector3f pt_y = R * Eigen::Vector3f(0,size,0) + t;
+  Eigen::Vector3f pt_z = R * Eigen::Vector3f(0,0,size) +t ;
 
-				cv::Point2f im_pt0, im_pt_x, im_pt_y, im_pt_z;
+  cv::Point2f im_pt0, im_pt_x, im_pt_y, im_pt_z;
 
-				if (!dist_coeffs.empty())
-				{
-								v4r::projectPointToImage(&pt0[0], &_intrinsic(0), &dist_coeffs(0), &im_pt0.x);
-								v4r::projectPointToImage(&pt_x[0], &_intrinsic(0), &dist_coeffs(0), &im_pt_x.x);
-								v4r::projectPointToImage(&pt_y[0], &_intrinsic(0), &dist_coeffs(0), &im_pt_y.x);
-								v4r::projectPointToImage(&pt_z[0], &_intrinsic(0), &dist_coeffs(0), &im_pt_z.x);
-				}
-				else
-				{
-								v4r::projectPointToImage(&pt0[0], &_intrinsic(0), &im_pt0.x);
-								v4r::projectPointToImage(&pt_x[0], &_intrinsic(0), &im_pt_x.x);
-								v4r::projectPointToImage(&pt_y[0], &_intrinsic(0), &im_pt_y.x);
-								v4r::projectPointToImage(&pt_z[0], &_intrinsic(0), &im_pt_z.x);
-				}
+  if (!dist_coeffs.empty())
+  {
+    v4r::projectPointToImage(&pt0[0], &_intrinsic(0), &dist_coeffs(0), &im_pt0.x);
+    v4r::projectPointToImage(&pt_x[0], &_intrinsic(0), &dist_coeffs(0), &im_pt_x.x);
+    v4r::projectPointToImage(&pt_y[0], &_intrinsic(0), &dist_coeffs(0), &im_pt_y.x);
+    v4r::projectPointToImage(&pt_z[0], &_intrinsic(0), &dist_coeffs(0), &im_pt_z.x);
+  }
+  else
+  {
+    v4r::projectPointToImage(&pt0[0], &_intrinsic(0), &im_pt0.x);
+    v4r::projectPointToImage(&pt_x[0], &_intrinsic(0), &im_pt_x.x);
+    v4r::projectPointToImage(&pt_y[0], &_intrinsic(0), &im_pt_y.x);
+    v4r::projectPointToImage(&pt_z[0], &_intrinsic(0), &im_pt_z.x);
+  }
 
-				cv::line(im, im_pt0, im_pt_x, CV_RGB(255,0,0), thickness);
-				cv::line(im, im_pt0, im_pt_y, CV_RGB(0,255,0), thickness);
-				cv::line(im, im_pt0, im_pt_z, CV_RGB(0,0,255), thickness);
+  cv::line(im, im_pt0, im_pt_x, CV_RGB(255,0,0), thickness);
+  cv::line(im, im_pt0, im_pt_y, CV_RGB(0,255,0), thickness);
+  cv::line(im, im_pt0, im_pt_z, CV_RGB(0,0,255), thickness);
 }
 
 /*********************************************************************
@@ -691,60 +660,53 @@ void drawCoordinateSystem(cv::Mat &im, const Eigen::Matrix4f &_pose, const cv::M
  ********************************************************************/
 void drawConfidenceBar(cv::Mat &im, const double &conf, int x_start, int x_end, int y)
 {
-				int bar_start = x_start, bar_end = x_end;
-				int diff = bar_end-bar_start;
-				int draw_end = diff*conf;
-				double col_scale = (diff>0?255./(double)diff:255.);
-				cv::Point2f pt1(0,y);
-				cv::Point2f pt2(0,y);
-				cv::Vec3b col(0,0,0);
+  int bar_start = x_start, bar_end = x_end;
+  int diff = bar_end-bar_start;
+  int draw_end = diff*conf;
+  double col_scale = (diff>0?255./(double)diff:255.);
+  cv::Point2f pt1(0,y);
+  cv::Point2f pt2(0,y);
+  cv::Vec3b col(0,0,0);
 
-				if (draw_end<=0) draw_end = 1;
+  if (draw_end<=0) draw_end = 1;
 
-				for (int i=0; i<draw_end; i++)
-				{
-								col = cv::Vec3b(255-(i*col_scale), i*col_scale, 0);
-								pt1.x = bar_start+i;
-								pt2.x = bar_start+i+1;
-								cv::line(im, pt1, pt2, CV_RGB(col[0],col[1],col[2]), 8);
-				}
+  for (int i=0; i<draw_end; i++)
+  {
+    col = cv::Vec3b(255-(i*col_scale), i*col_scale, 0);
+    pt1.x = bar_start+i;
+    pt2.x = bar_start+i+1;
+    cv::line(im, pt1, pt2, CV_RGB(col[0],col[1],col[2]), 8);
+  }
 }
 
-// draw 3D Point on img
-void drawCircle(cv::Mat &img, cv::Point3f center, int radius, cv::Scalar color, int thickness)
-{
-				std::vector<cv::Point3f> tmpPoints;
-				tmpPoints.push_back(center);
-				std::vector<cv::Point2f> centerPoint = cam.projectPoints(tmpPoints);
-				cv::circle(img, centerPoint[0], radius, color, thickness);
-}
+
 
 
 // Lexicographic compare, same as for ordering words in a dictionnary:
 // test first 'letter of the word' (x coordinate), if same, test 
 // second 'letter' (y coordinate).
 bool lexico_compare2f(const cv::Point2f& p1, const cv::Point2f& p2) {
-				if(p1.x < p2.x) { return true; }
-				if(p1.x > p2.x) { return false; }
-				return (p1.y < p2.y);
+  if(p1.x < p2.x) { return true; }
+  if(p1.x > p2.x) { return false; }
+  return (p1.y < p2.y);
 }
 
 
 bool points_are_equal2f(const cv::Point2f& p1, const cv::Point2f& p2) {
-				return ((p1.x == p2.x) && (p1.y == p2.y));
+  return ((p1.x == p2.x) && (p1.y == p2.y));
 }
 
 bool lexico_compare3f(const cv::Point3f& p1, const cv::Point3f& p2) {
-				if(p1.x < p2.x) { return true; }
-				if(p1.x > p2.x) { return false; }
-				if(p1.y < p2.y) { return true; }
-				if(p1.y > p2.y) { return false; }
-				return (p1.z < p2.z);
+  if(p1.x < p2.x) { return true; }
+  if(p1.x > p2.x) { return false; }
+  if(p1.y < p2.y) { return true; }
+  if(p1.y > p2.y) { return false; }
+  return (p1.z < p2.z);
 }
 
 
 bool points_are_equal3f(const cv::Point3f& p1, const cv::Point3f& p2) {
-				return ((p1.x == p2.x) && (p1.y == p2.y) && (p1.z == p2.z));
+  return ((p1.x == p2.x) && (p1.y == p2.y) && (p1.z == p2.z));
 }
 
 

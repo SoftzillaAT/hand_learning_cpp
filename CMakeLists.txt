@@ -37,6 +37,7 @@ target_link_libraries(hand_learning
 	Camera
 )
 
+#SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=gnu++0x")
 
 configure_file(./data/haarcascade_frontalface_alt.xml ./data/haarcascade_frontalface_alt.xml COPYONLY)
 configure_file(./data/haarcascade_frontalface_default.xml ./data/haarcascade_frontalface_default.xml COPYONLY)
