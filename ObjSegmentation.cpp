@@ -210,7 +210,7 @@ void ObjSegmentation::applyHystereses(cv::Mat image_hsv, float max_dist)
 }
 
 
-void ObjSegmentation::clusterObject(PointCloud<PointXYZRGB>::Ptr& cloud)
+void ObjSegmentation::clusterObject(PointCloud<PointXYZRGB>::Ptr& cloud, Point3f point)
 {
   pcl::PointCloud<pcl::PointXYZRGB>::Ptr tmp_cloud (new pcl::PointCloud<pcl::PointXYZRGB>);
 
@@ -236,7 +236,8 @@ void ObjSegmentation::clusterObject(PointCloud<PointXYZRGB>::Ptr& cloud)
   // apply mask for clustering
   applyMask(tmp_cloud, output_mask);
 
-  cv::Point2d nearest_point = getNearestPoint(tmp_cloud);
+  cv::Point2d nearest_point = getNearestPoint(tmp_cloud, point);
+
   if (true)
   {
     Mat image_hsv;
@@ -301,6 +302,19 @@ void ObjSegmentation::clusterObject(PointCloud<PointXYZRGB>::Ptr& cloud)
     grabCut(grab_mask);
     applyMask(cloud, obj_mask);
   }
+  
+  Eigen::Matrix<float, 4, 1 > tmp;
+  pcl::compute3DCentroid(*cloud , tmp);
+  
+  _obj_center.x = tmp[0];
+  _obj_center.y = tmp[1];
+  _obj_center.z = tmp[2];
+
+}
+
+Point3f ObjSegmentation::getObjCenter()
+{
+  return _obj_center;
 }
 
 Mat ObjSegmentation::getMaskFromPcl(PointCloud<PointXYZRGB>::Ptr& cluster)
@@ -333,89 +347,12 @@ Mat ObjSegmentation::getMaskFromPcl(PointCloud<PointXYZRGB>::Ptr& cluster)
 }
 
 
-void ObjSegmentation::clusterObjectWithGrabCut(PointCloud<PointXYZRGB>::Ptr& cloud)
+cv::Point2d ObjSegmentation::getNearestPoint(PointCloud<PointXYZRGB>::Ptr& cloud)
 {
-  pcl::PointCloud<pcl::PointXYZRGB>::Ptr tmp_cloud (new pcl::PointCloud<pcl::PointXYZRGB>);
-
-  pcl::PointCloud<pcl::PointXYZRGB>::Ptr cluster (new pcl::PointCloud<pcl::PointXYZRGB>);
-
-  pcl::copyPointCloud<pcl::PointXYZRGB, pcl::PointXYZRGB>(*cloud, *tmp_cloud);
-
-
-  // closing on mask
-  Mat closing_mask;
-  Mat kernel = Mat::ones(19,19,CV_8UC1);
-  cv::morphologyEx( skin_mask, closing_mask, 3, kernel );
-  //cv::imshow("closing", closing_mask);
-
-  Mat image_result;
-  //_image.copyTo(image_result, ~closing_mask);
-  //cv::imshow("Skin result after closing", image_result);
-
-  //  dilating on mask
-  Mat output_mask = closing_mask;
-  kernel = Mat::ones(11,11, CV_8UC1);
-  cv::dilate(output_mask, output_mask, kernel);
-  cv::imshow("dilating", output_mask);
-
-  applyMask(tmp_cloud, output_mask);
-
-  PclManipulation::clusterCloud2(tmp_cloud, cluster);
-
-  Mat image;
-  _cam.convertImage(*cluster, image, cloud->width, cloud->height, 8); 
-  imshow("Clusterd cloud", image);
-
-  std::vector<cv::Point3f> points;
-
-  BOOST_FOREACH (pcl::PointXYZRGB& pt, cluster->points)
-  {
-    points.push_back(cv::Point3f(pt.x, pt.y, pt.z));
-  }
-
-  std::vector<cv::Point2f> projectedPoints = _cam.projectPoints(points);
-
-
-  std::vector<cv::Point2f> hull;
-  cv::convexHull(projectedPoints, hull);
-
-
-  std::vector<Point2i> hulli;
-  for(int i = 0; i < hull.size(); i++)
-    hulli.push_back( cv::Point2i( (int)round(hull[i].x), (int)round(hull[i].y) ) );
-
-
-  vector<vector<Point2i> > contours;
-  contours.push_back(hulli);
-  Mat mask = Mat::zeros( _image.size(), CV_8UC1 );
-  Scalar color = Scalar(255);
-  drawContours( mask, contours, -1, color, CV_FILLED, 8, vector<Vec4i>(), 0, Point() );
-  //cv::imshow("hull",mask);
-
-  kernel = Mat::ones(69,69, CV_8UC1);
-  cv::dilate(mask, output_mask, kernel);
-  //cv::imshow("hull_dil",output_mask);
-  //cv::imshow("skin_mask", skin_mask);
-  //cv::max(skin_mask, ~outpu_mask, skin_mask);
-  Mat grab_mask = skin_mask;
-  cv::bitwise_or(grab_mask, ~output_mask, grab_mask);
-
-  grab_mask = ~grab_mask;
-  //grab_mask = output_mask;
-  //cv::imshow("hull_dill_combined", grab_mask);
-  //cout << "MASK: " << endl << mask << endl;
-
-  cv::Mat foreground(_image.size(),CV_8UC3,cv::Scalar(255,255,255));
-  _image.copyTo(foreground, grab_mask); // bg pixels not copied
-
-  cv::imshow("Grabcut input", foreground);
-
-  grab_mask.setTo(GC_PR_FGD, grab_mask == 255); 
-  grabCut(grab_mask);
-  applyMask(cloud, obj_mask);
+  return getNearestPoint(cloud, Point3f(0,0,0));
 }
 
-cv::Point2d ObjSegmentation::getNearestPoint(PointCloud<PointXYZRGB>::Ptr& cloud)
+cv::Point2d ObjSegmentation::getNearestPoint(PointCloud<PointXYZRGB>::Ptr& cloud, Point3f refPoint)
 {
   float minz = 10000;
   cv::Point result;
@@ -424,7 +361,10 @@ cv::Point2d ObjSegmentation::getNearestPoint(PointCloud<PointXYZRGB>::Ptr& cloud
     for (unsigned u = 0; u < cloud->width; u++)
     {
       pcl::PointXYZRGB &pt = (*cloud)(u,v);
-      float dist = sqrt(pt.z*pt.z + pt.x * pt.x + pt.y * pt.y);
+      float x = pt.x - refPoint.x;
+      float y = pt.y - refPoint.y;
+      float z = pt.z - refPoint.z;
+      float dist = sqrt(z * z + x * x + y * y);
       if (dist < minz)
       {
         minz = dist;
@@ -436,7 +376,6 @@ cv::Point2d ObjSegmentation::getNearestPoint(PointCloud<PointXYZRGB>::Ptr& cloud
 
   return result;
 }
-
 
 
 void ObjSegmentation::applyMask(PointCloud<PointXYZRGB>::Ptr& cloud)

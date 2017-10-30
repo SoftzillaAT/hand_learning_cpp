@@ -3,7 +3,8 @@
 
 FaceDetection::FaceDetection(Mat image)
 {
-  _image = image;
+  _image_orig = image.clone();
+  _face_image = image.clone();
   face_cascade_name = "./data/haarcascade_frontalface_alt.xml";
   eyes_cascade_name = "./data/haarcascade_eye.xml";
 
@@ -12,11 +13,12 @@ FaceDetection::FaceDetection(Mat image)
 void FaceDetection::showResult()
 {
   //-- Show what you got
-  imshow( "Face detection", _image );
+  imshow( "Face detection", _face_image );
 }
 
 bool FaceDetection::detectFace()
 {
+  _face_image = _image_orig.clone();
   _face.release();
   //-- 1. Load the cascades
   if( !face_cascade.load( face_cascade_name ) )
@@ -34,7 +36,7 @@ bool FaceDetection::detectFace()
   std::vector<Rect> faces;
   Mat frame_gray;
 
-  cvtColor( _image, frame_gray, CV_BGR2GRAY );
+  cvtColor( _image_orig, frame_gray, CV_BGR2GRAY );
   equalizeHist( frame_gray, frame_gray );
 
   //-- Detect faces
@@ -55,14 +57,14 @@ bool FaceDetection::detectFace()
     //faces[i].width = faces[i].width*0.8;
     //faces[i].y = faces[i].y + faces[i].height * 0.05;
     //faces[i].height = faces[i].height*0.9;
-    //_face = _image(face_mask);
+    //_face = _image(faces[i]);
 
-    Mat myFaceROI = _image(faces[i]);
+    Mat myFaceROI = _image_orig(faces[i]);
     myFaceROI.copyTo(_face, face_mask);
     cv::imshow("FaceROI", _face);
 
 
-    ellipse( _image, center, Size( faces[i].width*0.5, 
+    ellipse( _face_image, center, Size( faces[i].width*0.5, 
           faces[i].height*0.5), 0, 0, 360, 
         Scalar( 255, 0, 255 ), 4, 8, 0 );
 
@@ -79,7 +81,7 @@ bool FaceDetection::detectFace()
       Point center( faces[i].x + eyes[j].x + eyes[j].width*0.5, 
           faces[i].y + eyes[j].y + eyes[j].height*0.5 );
       int radius = cvRound( (eyes[j].width + eyes[j].height)*0.25 );
-      circle( _image, center, radius, Scalar( 255, 0, 0 ), 4, 8, 0 );
+      circle( _face_image, center, radius, Scalar( 255, 0, 0 ), 4, 8, 0 );
     }
   }
 
@@ -89,7 +91,7 @@ bool FaceDetection::detectFace()
 void FaceDetection::calcHistogram()
 {
   Mat src, hsv;
-  src = _image;
+  src = _image_orig;
   cvtColor(src, hsv, CV_BGR2HSV);
 
   // Quantize the hue to 30 levels
@@ -140,7 +142,7 @@ std::vector< cv::Vec3b > FaceDetection::getSkinPoints()
   _skin_points.clear();
   std::vector<Point3f> face_points = getHsvCylinder();
   pcl::PointCloud<PointXYZRGB>::Ptr skin_cloud = PclManipulation::createCloud(face_points);
-  std::vector<Point3f> skin_clusters = PclManipulation::calcMeanShiftPoints(skin_cloud, 20, 50);
+  std::vector<Point3f> skin_clusters = PclManipulation::calcMeanShiftPoints(skin_cloud, 50, 30);
   Point3f biggest_cluster = PclManipulation::getClusterPoint(skin_clusters, 20);
   float s = sqrt(pow(biggest_cluster.x,2) + pow(biggest_cluster.y,2));
   float alpha = asin(biggest_cluster.y / s);

@@ -94,7 +94,6 @@ void trackImage(const PointCloud<PointXYZRGB>::ConstPtr&);
 
 /* ######################### Constants ############################# */
 const float bad_point = std::numeric_limits<float>::quiet_NaN();
-const int max_loose_pose = 10; 						// Maximum number of lost poses until the grabber ends
 
 
 /* ######################### Variables ############################# */
@@ -167,7 +166,7 @@ int border_dist=3;
 int border_offset=3;
 
 // hysterese params
-int hyst_dist=8;
+int hyst_dist=7;
 
 // skin params
 int h_range = 3;
@@ -177,7 +176,10 @@ int v_range = 10;
 // Cluster params
 int useGrabCut = 0;
 
+int max_loose_pose = 3; 						// Maximum number of lost poses until the grabber ends
+
 std::vector<cv::Vec3b> skin_points;
+cv::Point3f obj_point(0, 0, 0);
 
 /*********************************************************************
  * Main entrypoint of the program
@@ -234,6 +236,7 @@ int main(int argc, char** argv)
 	cv::createTrackbar("v range", "trackbars", &s_range, 255);
 	cv::createTrackbar("Hysterese dist", "trackbars", &hyst_dist, 200);
 	cv::createTrackbar("Use grabCut", "trackbars", &useGrabCut, 1);
+	cv::createTrackbar("Max loose Pose", "trackbars", &max_loose_pose, 10);
 	
 
 	while(!stopCamera)
@@ -351,6 +354,9 @@ void grabberCallback(const PointCloud<PointXYZRGBA>::ConstPtr& cloud)
       //skin_points.push_back(cv::Vec3b(178,114,146));
       //skin_points.push_back(cv::Vec3b(4,121,129));
       mode = tracking;
+
+      cout << "HOLD OBJECT TO CAMERA AND PRESS SPACE" << endl;
+      cv::waitKey();
     }
     else
     {
@@ -375,8 +381,8 @@ void grabberCallback(const PointCloud<PointXYZRGBA>::ConstPtr& cloud)
 
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr result_cluster (new pcl::PointCloud<pcl::PointXYZRGB>);
     seg.useGrabCut = (bool)useGrabCut;
-    seg.clusterObject(mycloud);
-
+    seg.clusterObject(mycloud, obj_point);
+    obj_point = seg.getObjCenter();
     end = clock();
     DEBUG(0, cout << "Time required for segmentation: "<< (double)(end-start)/CLOCKS_PER_SEC << " seconds." << "\n\n");
 

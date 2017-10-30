@@ -21,7 +21,8 @@ using namespace std;
 class FaceDetection
 {
   private:
-    Mat _image;
+    Mat _image_orig;
+    Mat _face_image;
     Mat _face;
     Mat skin_mask;
     std::vector< cv::Vec3b > _skin_points;
