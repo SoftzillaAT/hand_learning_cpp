@@ -12,6 +12,8 @@
 #include "PclManipulation.h"
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
+#include "adaptiveskindetector.hpp"
+#include "ColorHistogram.hpp"
 
 #define PI 3.14159265
 

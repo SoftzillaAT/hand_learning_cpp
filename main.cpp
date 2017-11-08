@@ -166,7 +166,7 @@ int border_dist=3;
 int border_offset=3;
 
 // hysterese params
-int hyst_dist=7;
+int hyst_dist=5;
 
 // skin params
 int h_range = 3;
@@ -175,9 +175,10 @@ int v_range = 10;
 
 // Cluster params
 int useGrabCut = 0;
+int track_image = 1;
 
-int max_loose_pose = 3; 						// Maximum number of lost poses until the grabber ends
-
+int max_loose_pose = 5; 						// Maximum number of lost poses until the grabber ends
+int frame_counter = 0;              // Counts the numbers of tracking frames
 std::vector<cv::Vec3b> skin_points;
 cv::Point3f obj_point(0, 0, 0);
 
@@ -234,9 +235,10 @@ int main(int argc, char** argv)
 	cv::createTrackbar("h range", "trackbars", &h_range, 180);
 	cv::createTrackbar("s range", "trackbars", &v_range, 255);
 	cv::createTrackbar("v range", "trackbars", &s_range, 255);
-	cv::createTrackbar("Hysterese dist", "trackbars", &hyst_dist, 200);
+	cv::createTrackbar("Hysterese dist", "trackbars", &hyst_dist, 15);
 	cv::createTrackbar("Use grabCut", "trackbars", &useGrabCut, 1);
 	cv::createTrackbar("Max loose Pose", "trackbars", &max_loose_pose, 10);
+	cv::createTrackbar("TrackImage", "trackbars", &track_image, 1);
 	
 
 	while(!stopCamera)
@@ -366,6 +368,12 @@ void grabberCallback(const PointCloud<PointXYZRGBA>::ConstPtr& cloud)
 
   if (mode == tracking)
   {
+    frame_counter++;
+    
+    // skip first 3 frames
+    if (frame_counter < 3)
+      return;
+
     DEBUG(2, cout << "Mode tracking" << endl);
 
     start = clock();
@@ -382,20 +390,41 @@ void grabberCallback(const PointCloud<PointXYZRGBA>::ConstPtr& cloud)
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr result_cluster (new pcl::PointCloud<pcl::PointXYZRGB>);
     seg.useGrabCut = (bool)useGrabCut;
     seg.clusterObject(mycloud, obj_point);
-    obj_point = seg.getObjCenter();
+    cv::Point3f new_obj_point = seg.getObjCenter();
+    double obj_dist;
+
+    // do not calc distance on first frame
+    if (obj_point.x == 0 && obj_point.y == 0 && obj_point.z == 0)
+      obj_dist = 0;
+    else
+      obj_dist = cv::norm(cv::Mat(obj_point),cv::Mat(new_obj_point));
+
     end = clock();
     DEBUG(0, cout << "Time required for segmentation: "<< (double)(end-start)/CLOCKS_PER_SEC << " seconds." << "\n\n");
 
-    //seg.applyMask(mycloud);
-    //cv::Point3f p = seg.getNearestPoint(mycloud);
 
-    cam.convertImage(*mycloud, image);
-    image.copyTo(im_draw);
-    cv::imshow("image",im_draw);
+    if (obj_dist < 0.1)
+    {
+      obj_point = new_obj_point;
 
-    //mode = capture;
+      if (track_image)
+      {
+        trackImage(mycloud);
+      }
+      else
+      {
+        cam.convertImage(*mycloud, image);
+        image.copyTo(im_draw);
+        cv::imshow("image",im_draw);
+      }
+    }
+    else
+    {
+      cout << "SKIP FRAME. OBjECT DISTANCE: " << obj_dist << endl;
+      lost_pose_counter++;
+    }
 
-    //trackImage(mycloud);
+
     if (lost_pose_counter >= max_loose_pose)
     {
       mode = stop;

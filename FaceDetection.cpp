@@ -18,6 +18,8 @@ void FaceDetection::showResult()
 
 bool FaceDetection::detectFace()
 {
+
+  Mat aMask = Mat::zeros(_image_orig.rows, _image_orig.cols, CV_8UC1); 
   _face_image = _image_orig.clone();
   _face.release();
   //-- 1. Load the cascades
@@ -68,6 +70,12 @@ bool FaceDetection::detectFace()
           faces[i].height*0.5), 0, 0, 360, 
         Scalar( 255, 0, 255 ), 4, 8, 0 );
 
+     ellipse(aMask, center, Size( faces[i].width*0.5, 
+          faces[i].height*0.5), 0, 0, 360, 
+        Scalar(255), -1, 8, 0 );
+
+    imshow("aMask", aMask);
+
     // skip other faces and eye detection
     break;
     Mat faceROI = frame_gray ( faces[i] );
@@ -84,6 +92,18 @@ bool FaceDetection::detectFace()
       circle( _face_image, center, radius, Scalar( 255, 0, 0 ), 4, 8, 0 );
     }
   }
+
+  AdaptiveSkinDetector ss1;
+  Mat hmask = aMask.clone();
+   
+  ss1.run(_image_orig, hmask);
+  imshow("adaptive skin detection", hmask);
+  ColorHistogram chi;
+  std::vector<int> channels;
+  chi.setChannel(channels);
+  return true;
+
+
 
   return !_face.empty();
 }

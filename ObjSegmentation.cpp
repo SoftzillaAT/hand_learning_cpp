@@ -195,6 +195,9 @@ void ObjSegmentation::applyHystereses(cv::Mat image_hsv, float max_dist)
       float dh = min(abs(h1-h0), 180-abs(h1-h0));
       float ds = abs(s1-s0);
       float dv = abs(v1-v0);
+  
+      // only try hs colorspace
+      dv = 0;
 
       //float dist = norm(color, ref_color, cv::NORM_L2);
       float dist = sqrt(dh*dh+ds*ds+dv*dv);

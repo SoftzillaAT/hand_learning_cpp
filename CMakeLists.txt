@@ -22,6 +22,8 @@ add_definitions(-DDEBUG_LEVEL=1)
 add_library(FaceDetection FaceDetection.cpp)
 add_library(ObjSegmentation ObjSegmentation.cpp)
 add_library(PclManipulation PclManipulation.cpp)
+add_library(ColorHistogram ColorHistogram.cpp)
+add_library(adaptiveskindetector adaptiveskindetector.cpp)
 add_library(Camera Camera.cpp)
 
 add_executable(hand_learning main.cpp)
@@ -35,6 +37,8 @@ target_link_libraries(hand_learning
 	ObjSegmentation
 	PclManipulation
 	Camera
+  ColorHistogram
+  adaptiveskindetector
 )
 
 #SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=gnu++0x")
