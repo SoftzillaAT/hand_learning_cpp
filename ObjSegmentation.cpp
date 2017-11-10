@@ -288,10 +288,18 @@ void ObjSegmentation::clusterObject(PointCloud<PointXYZRGB>::Ptr& cloud, Point3f
   }
   else
   {
+    // check if mask is valid
+    int pixels = cv::countNonZero(mask);
+    if (pixels < 100)
+    {
+      cout << "Too small mask of " << pixels << " pixels" << endl;
+      applyMask(cloud, ~mask);
+      return;
+    }
     kernel = Mat::ones(21,21, CV_8UC1);
     cv::dilate(mask, output_mask, kernel);
 
-    Mat grab_mask = skin_mask;
+    Mat grab_mask = skin_mask.clone();
     cv::bitwise_or(grab_mask, ~output_mask, grab_mask);
 
     grab_mask = ~grab_mask;
@@ -305,10 +313,10 @@ void ObjSegmentation::clusterObject(PointCloud<PointXYZRGB>::Ptr& cloud, Point3f
     grabCut(grab_mask);
     applyMask(cloud, obj_mask);
   }
-  
+
   Eigen::Matrix<float, 4, 1 > tmp;
   pcl::compute3DCentroid(*cloud , tmp);
-  
+
   _obj_center.x = tmp[0];
   _obj_center.y = tmp[1];
   _obj_center.z = tmp[2];

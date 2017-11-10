@@ -9,14 +9,16 @@ bool SkinDetection::init(Mat face, Mat face_mask)
 {
   Mat y_face;
   cvtColor(face, y_face, CV_BGR2YCrCb);
-  
-  this->calculateLuminanceRange(y_face, face_mask);
+  int ymin;
+  int ymax;
+
+  this->calculateRangeHist(y_face, face_mask, ymin, ymax, "Luminance Hist");
 
 
-  cout << "YMIN: " << _ymin << " | YMAX: " << _ymax << endl;
+  cout << "YMIN: " << ymin << " | YMAX: " << ymax << endl;
 
-  cv::Vec3b low(_ymin, 0, 0);
-  cv::Vec3b high(_ymax, 255 , 255);
+  cv::Vec3b low(ymin, 0, 0);
+  cv::Vec3b high(ymax, 255 , 255);
   
   // calculate new face mask with luminance range
   cv::inRange(y_face, low, high, face_mask);
@@ -25,8 +27,42 @@ bool SkinDetection::init(Mat face, Mat face_mask)
   face.copyTo(myface, face_mask);
   imshow("Filtered Face", myface);
 
+  Mat matNormR = Mat::zeros(face.rows, face.cols, CV_8UC1);
+  Mat matNormG = Mat::zeros(face.rows, face.cols, CV_8UC1);
+  Mat matR     = Mat::zeros(face.rows, face.cols, CV_8UC1); 
 
-  //Mat norm_r = Mat::zeros(face.rows, face.cols, CV_8UC1);
+  for (int i = 0; i < myface.cols; i++) 
+  {
+    for (int j = 0; j < myface.rows; j++) 
+    {
+      if (face_mask.at<char>(j, i) == 0)
+        continue;
+      
+      Vec3b intensity = myface.at<Vec3b>(j, i);
+      float B = intensity.val[0];
+      float G = intensity.val[1];
+      float R = intensity.val[2];
+
+      float rgbSum = (float) (R + G + B);
+
+      if (rgbSum == 0)
+        continue;
+      
+      float r = (float) (R / rgbSum);
+      float g = (float) (G / rgbSum);
+
+      matNormR.at<uint8_t>(j, i) = (uint8_t)(r * 255);
+      matNormG.at<uint8_t>(j, i) = (uint8_t)(g * 255);
+      matR.at<uint8_t>(j, i) = (uint8_t)R;
+    }
+  }
+
+  int rmin=0, gmin=0, Rmin=0;
+  int rmax=255, gmax=255, Rmax=255;
+  // disable hist range
+  this->calculateRangeHist(matNormR, face_mask, rmin, rmax, "Norm r histogram"); 
+  this->calculateRangeHist(matNormG, face_mask, gmin, gmax, "Norm g histogram"); 
+  this->calculateRangeHist(matR, face_mask, Rmin, Rmax, "R histogram"); 
 
   float mu_r = 0;
   float mu_g = 0;
@@ -36,40 +72,9 @@ bool SkinDetection::init(Mat face, Mat face_mask)
   float sigma_g = 0;
   float sigma_R = 0;
 
-  int counter = 0;
-  for (int i = 0; i < myface.cols; i++) 
-  {
-    for (int j = 0; j < myface.rows; j++) 
-    {
-      if (face_mask.at<char>(j, i) == 0)
-        continue;
-
-      counter++;
-      Vec3b intensity = myface.at<Vec3b>(j, i);
-      float B = intensity.val[0];
-      float G = intensity.val[1];
-      float R = intensity.val[2];
-
-      float rgbSum = (float) (R + G + B);
-      float r = (float) (R / rgbSum);
-      float g = (float) (G / rgbSum);
-
-      mu_r += r;
-      mu_g += g;
-      mu_R += R;
-
-      //float blueNorm = (float) (B / rgbSum); 
-
-      //res.at<Vec3b>(j, i)[0] = blueNorm;
-      //res.at<Vec3b>(j, i)[1] = greenNorm;
-      //res.at<Vec3b>(j, i)[2] = redNorm;
-    }
-  }
-
-  mu_r = mu_r / counter;
-  mu_g = mu_g / counter;
-  mu_R = mu_R / counter;
-
+  int rcounter = 0;
+  int gcounter = 0;
+  int Rcounter = 0;
 
   for (int i = 0; i < myface.cols; i++) 
   {
@@ -84,27 +89,87 @@ bool SkinDetection::init(Mat face, Mat face_mask)
       float R = intensity.val[2];
 
       float rgbSum = (float) (R + G + B);
+
+      if (rgbSum == 0)
+        continue;
+
       float r = (float) (R / rgbSum);
       float g = (float) (G / rgbSum);
 
-      sigma_r += pow(r - mu_r, 2);
-      sigma_g += pow(g - mu_g, 2);
-      sigma_R += pow(R - mu_R, 2);
+
+      // check borders
+      if (rmin < r*255 && r*255 < rmax)
+      {
+        mu_r += r;
+        rcounter++;
+      }
+
+      if (gmin < g*255 && g*255 < gmax)
+      {
+        mu_g += g;
+        gcounter++;
+      }
+
+      if (Rmin < R && R < Rmax)
+      {
+        mu_R += R;
+        Rcounter++;
+      }
     }
   }
 
-  sigma_r = sqrt(sigma_r / counter);
-  sigma_g = sqrt(sigma_g / counter);
-  sigma_R = sqrt(sigma_R / counter);
+  mu_r = mu_r / rcounter;
+  mu_g = mu_g / gcounter;
+  mu_R = mu_R / Rcounter;
 
+
+  for (int i = 0; i < myface.cols; i++) 
+  {
+    for (int j = 0; j < myface.rows; j++) 
+    {
+      if (face_mask.at<char>(j, i) == 0)
+        continue;
+
+      Vec3b intensity = myface.at<Vec3b>(j, i);
+      float B = intensity.val[0];
+      float G = intensity.val[1];
+      float R = intensity.val[2];
+
+      float rgbSum = (float) (R + G + B);
+      if (rgbSum == 0)
+        continue;
+      float r = (float) (R / rgbSum);
+      float g = (float) (G / rgbSum);
+
+      if (rmin < r*255 && r*255 < rmax)
+      {
+        sigma_r += pow(r - mu_r, 2);
+      }
+
+      if (gmin < r*255 && r*255 < gmax)
+      {
+        sigma_g += pow(g - mu_g, 2);
+      }
+
+      if (Rmin < R && R < Rmax)
+      {
+        sigma_R += pow(R - mu_R, 2);
+      }
+    }
+  }
   
-  _rLowBound = mu_r - 2 * sigma_r;
-  _gLowBound = mu_g - 2 * sigma_g;
-  _RLowBound = mu_R - 2 * sigma_R;
+  sigma_r = sqrt(sigma_r / rcounter);
+  sigma_g = sqrt(sigma_g / gcounter);
+  sigma_R = sqrt(sigma_R / Rcounter);
 
-  _rUpBound = mu_r + 2 * sigma_r;
-  _gUpBound = mu_g + 2 * sigma_g;
-  _RUpBound = mu_R + 2 * sigma_R;
+
+  _rLowBound = mu_r - 3.5 * sigma_r;
+  _gLowBound = mu_g - 3.5 * sigma_g;
+  _RLowBound = mu_R - 3.5 * sigma_R;
+
+  _rUpBound = mu_r + 3.5 * sigma_r;
+  _gUpBound = mu_g + 3.5 * sigma_g;
+  _RUpBound = mu_R + 3.5 * sigma_R;
 
 
   cout << _rLowBound << " | " << _rUpBound << endl;
@@ -114,12 +179,11 @@ bool SkinDetection::init(Mat face, Mat face_mask)
   return true;
 }
 
-
-void SkinDetection::calculateLuminanceRange(Mat face, Mat face_mask)
+void SkinDetection::calculateRangeHist(Mat img, Mat mask, int &min, int &max, string imTitle)
 {
   // Separate the image in 3 places ( B, G and R )
   vector<Mat> col_planes;
-  split( face, col_planes );
+  split( img, col_planes );
 
   /// Establish the number of bins
   int histSize = 128;
@@ -134,10 +198,14 @@ void SkinDetection::calculateLuminanceRange(Mat face, Mat face_mask)
   bool uniform = true; 
   bool accumulate = false;
 
-  Mat y_hist, cr_hist, cb_hist;
+  Mat y_hist;
 
   /// Compute the histograms:
-  calcHist( &col_planes[0], 1, 0, face_mask, y_hist, 1, &histSize, &histRange, uniform, accumulate );
+  calcHist( &col_planes[0], 1, 0, mask, y_hist, 1, &histSize, &histRange, uniform, accumulate );
+
+
+  // delete peak at position 0
+  y_hist.at<float>(0) = 0;
 
   // Draw the histograms for B, G and R
   int hist_w = 512; int hist_h = 400;
@@ -157,6 +225,7 @@ void SkinDetection::calculateLuminanceRange(Mat face, Mat face_mask)
 
   }
 
+
   // Trim the left side of the histogram by mirroring the right site
   double maxVal=0;
   Point maxLocPoint;
@@ -164,7 +233,9 @@ void SkinDetection::calculateLuminanceRange(Mat face, Mat face_mask)
 
   int maxLoc = maxLocPoint.y;
   int trim_right = histSize - 1;
-
+  
+  cout << "Max Loc: " << maxLoc << ": " << maxVal << endl;
+    
   for (int i = maxLoc; i < histSize; i++)
   {
     float val = y_hist.at<float>(i);
@@ -192,10 +263,10 @@ void SkinDetection::calculateLuminanceRange(Mat face, Mat face_mask)
       Point( bin_w * trim_right, hist_h ),
       Scalar( 0, 255, 0), 2, 8, 0  );
 
-  _ymin = trim_left  * (256 / histSize);
-  _ymax = trim_right * (256 / histSize);
+  min = trim_left  * (256 / histSize);
+  max = trim_right * (256 / histSize);
   /// Display
-  imshow("Luminance Histogram", histImage );
+  imshow(imTitle, histImage );
 
 }
 
@@ -203,7 +274,7 @@ Mat SkinDetection::getSkinMask(Mat image)
 {
 
   Mat mask  = Mat::zeros(image.rows, image.cols, CV_8UC1);
-  
+
   for (int i = 0; i < image.cols; i++) 
   {
     for (int j = 0; j < image.rows; j++) 
@@ -213,19 +284,29 @@ Mat SkinDetection::getSkinMask(Mat image)
       float B = intensity.val[0];
       float G = intensity.val[1];
       float R = intensity.val[2];
-      
+
       float rgbSum = (float) (R + G + B);
       float r = (float) (R / rgbSum);
       float g = (float) (G / rgbSum);
 
       if ( _rUpBound > r && r > _rLowBound &&
-           _gUpBound > g && g > _gLowBound &&
-           _RUpBound > R && R > _RLowBound)
+          _gUpBound > g && g > _gLowBound &&
+          _RUpBound > R && R > _RLowBound)
       {
         mask.at<char>(j,i) = 255;
       }
     }
   }
+
+  Mat tmp_mask = mask.clone();
+  imshow("Skin mask before noise reduction", tmp_mask);
+
+  // get rid of noise. 
+  Mat kernel = Mat::ones(3,3, CV_8UC1);
+  cv::erode(mask, mask, kernel);
+  cv::dilate(mask, mask, kernel);
+  cv::imshow("Noise reducing", mask);
+
 
   return mask;
 

@@ -32,7 +32,7 @@ class SkinDetection
     float _gUpBound;
     float _RUpBound;
 
-    void calculateLuminanceRange(Mat face, Mat face_mask);
+    void calculateRangeHist(Mat img, Mat mask, int &min, int &max, string imTitle);
   public:
     SkinDetection();
     //SkinDetection(Mat image);

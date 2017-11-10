@@ -52,7 +52,8 @@ void Camera::calculateCameraSettings(PointCloud<PointXYZRGB>::Ptr& cloud)
 std::vector<Point2f> Camera::projectPoints(std::vector<Point3f> points)
 {
   std::vector<Point2f> result;
-
+  if (points.size() == 0)
+    return result;
   if (!init_camera)
   {
     cout << "Cameraparameters not set" << endl;
