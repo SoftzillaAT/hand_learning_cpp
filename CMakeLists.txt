@@ -25,6 +25,7 @@ add_library(PclManipulation PclManipulation.cpp)
 add_library(ColorHistogram ColorHistogram.cpp)
 add_library(adaptiveskindetector adaptiveskindetector.cpp)
 add_library(Camera Camera.cpp)
+add_library(SkinDetection SkinDetection.cpp)
 
 add_executable(hand_learning main.cpp)
 
@@ -39,6 +40,7 @@ target_link_libraries(hand_learning
 	Camera
   ColorHistogram
   adaptiveskindetector
+  SkinDetection
 )
 
 #SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=gnu++0x")

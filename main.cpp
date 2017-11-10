@@ -17,6 +17,7 @@
 #include "ObjSegmentation.h"
 #include "PclManipulation.h"
 #include "Camera.h"
+#include "SkinDetection.h"
 
 #include <cv.h>
 #include <highgui.h>
@@ -155,6 +156,7 @@ cv::Point3f min_point; // nearest point to camera
 
 // camera parameter
 Camera cam;
+SkinDetection skin_detection;
 
 bool view_error = false;
 bool filediskmode = false;
@@ -218,7 +220,10 @@ int main(int argc, char** argv)
 	// camera settings
 	intrinsic << 525, 0.0, 319.5, 0.0, 525, 239.5, 0.0, 0.0, 1.0; // Kinect RGB camera intrinsics
 	cam = Camera(distCoeffs, intrinsic);
-	
+
+  // initialise skin detector
+  //skin_detection = SkinDetection();
+
 	// initialize tracker
 	initTracker();
  	
@@ -348,6 +353,7 @@ void grabberCallback(const PointCloud<PointXYZRGBA>::ConstPtr& cloud)
     // Detect face for tracking
     if (face.detectFace())
     {
+      skin_detection.init(face.getFace(), face.getFaceMask());
       face.showResult();
       // get color from skin
       skin_points = face.getSkinPoints();
@@ -381,8 +387,10 @@ void grabberCallback(const PointCloud<PointXYZRGBA>::ConstPtr& cloud)
 
     cam.convertImage(*mycloud, image);
     ObjSegmentation seg(image, cam);
-    seg.setSkinMask(skin_points, h_range, s_range, v_range, hyst_dist);
-
+    Mat skin_mask = skin_detection.getSkinMask(image);
+    imshow("New Skin Mask", skin_mask);
+    //seg.setSkinMask(skin_points, h_range, s_range, v_range, hyst_dist);
+    seg.skin_mask = skin_mask;
     //cout << "Start Segmentation" << endl;
 
 
@@ -402,26 +410,25 @@ void grabberCallback(const PointCloud<PointXYZRGBA>::ConstPtr& cloud)
     end = clock();
     DEBUG(0, cout << "Time required for segmentation: "<< (double)(end-start)/CLOCKS_PER_SEC << " seconds." << "\n\n");
 
-
-    if (obj_dist < 0.1)
+    if (track_image)
     {
-      obj_point = new_obj_point;
-
-      if (track_image)
+      if (obj_dist < 0.1)
       {
+        obj_point = new_obj_point;
         trackImage(mycloud);
       }
       else
       {
-        cam.convertImage(*mycloud, image);
-        image.copyTo(im_draw);
-        cv::imshow("image",im_draw);
+        cout << "SKIP FRAME. OBjECT DISTANCE: " << obj_dist << endl;
+        lost_pose_counter++;
       }
     }
     else
     {
-      cout << "SKIP FRAME. OBjECT DISTANCE: " << obj_dist << endl;
-      lost_pose_counter++;
+      cam.convertImage(*mycloud, image);
+      image.copyTo(im_draw);
+      cv::imshow("image",im_draw);
+
     }
 
 

@@ -12,8 +12,8 @@
 #include "PclManipulation.h"
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
-#include "adaptiveskindetector.hpp"
-#include "ColorHistogram.hpp"
+//#include "adaptiveskindetector.hpp"
+//#include "ColorHistogram.hpp"
 
 #define PI 3.14159265
 
@@ -23,9 +23,10 @@ using namespace std;
 class FaceDetection
 {
   private:
-    Mat _image_orig;
-    Mat _face_image;
-    Mat _face;
+    Mat _image_orig;  // original image
+    Mat _face_image;  // original image with the face colored
+    Mat _face;        // image of the face
+    Mat _face_mask;   // mask of the face
     Mat skin_mask;
     std::vector< cv::Vec3b > _skin_points;
     CascadeClassifier face_cascade;
@@ -39,6 +40,8 @@ class FaceDetection
     FaceDetection(Mat image);
     void showResult();
     bool detectFace();
+    Mat getFace();
+    Mat getFaceMask();
     std::vector< cv::Vec3b > getSkinPoints();
 
 };

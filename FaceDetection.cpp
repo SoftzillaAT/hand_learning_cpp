@@ -50,10 +50,10 @@ bool FaceDetection::detectFace()
     Point center( faces[i].x + faces[i].width*0.5, 
         faces[i].y + faces[i].height*0.5 );
 
-    Mat face_mask = Mat::zeros(faces[i].height, faces[i].width, CV_8UC1);
+    _face_mask = Mat::zeros(faces[i].height, faces[i].width, CV_8UC1);
 
-    ellipse(face_mask, Point(faces[i].width*0.5, faces[i].height*0.5),
-        Size(faces[i].width * 0.5, faces[i].height*0.5),
+    ellipse(_face_mask, Point(faces[i].width*0.5, faces[i].height*0.5),
+        Size(faces[i].width * 0.4, faces[i].height*0.4),
         0, 0, 360, Scalar(255), -1, 8, 0);
     //faces[i].x = faces[i].x + faces[i].width * 0.1;
     //faces[i].width = faces[i].width*0.8;
@@ -62,7 +62,7 @@ bool FaceDetection::detectFace()
     //_face = _image(faces[i]);
 
     Mat myFaceROI = _image_orig(faces[i]);
-    myFaceROI.copyTo(_face, face_mask);
+    myFaceROI.copyTo(_face, _face_mask);
     cv::imshow("FaceROI", _face);
 
 
@@ -74,7 +74,7 @@ bool FaceDetection::detectFace()
           faces[i].height*0.5), 0, 0, 360, 
         Scalar(255), -1, 8, 0 );
 
-    imshow("aMask", aMask);
+    //imshow("aMask", aMask);
 
     // skip other faces and eye detection
     break;
@@ -93,7 +93,7 @@ bool FaceDetection::detectFace()
     }
   }
 
-  AdaptiveSkinDetector ss1;
+/*  AdaptiveSkinDetector ss1;
   Mat hmask = aMask.clone();
    
   ss1.run(_image_orig, hmask);
@@ -101,12 +101,23 @@ bool FaceDetection::detectFace()
   ColorHistogram chi;
   std::vector<int> channels;
   chi.setChannel(channels);
-  return true;
+  return true;*/
 
 
 
   return !_face.empty();
 }
+
+Mat FaceDetection::getFace()
+{
+  return _face;
+}
+
+Mat FaceDetection::getFaceMask()
+{
+  return _face_mask;
+}
+
 
 void FaceDetection::calcHistogram()
 {
