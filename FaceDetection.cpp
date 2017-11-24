@@ -1,13 +1,17 @@
 #include "FaceDetection.h"
 
 
-FaceDetection::FaceDetection(Mat image)
+FaceDetection::FaceDetection()
 {
-  _image_orig = image.clone();
-  _face_image = image.clone();
   face_cascade_name = "./data/haarcascade_frontalface_alt.xml";
   eyes_cascade_name = "./data/haarcascade_eye.xml";
 
+}
+
+void FaceDetection::setImage(Mat image)
+{
+  _image_orig = image.clone();
+  _face_image = image.clone();
 }
 
 void FaceDetection::showResult()
@@ -16,9 +20,8 @@ void FaceDetection::showResult()
   imshow( "Face detection", _face_image );
 }
 
-bool FaceDetection::detectFace()
+bool FaceDetection::detectFace(bool denoising)
 {
-
   Mat aMask = Mat::zeros(_image_orig.rows, _image_orig.cols, CV_8UC1); 
   _face_image = _image_orig.clone();
   _face.release();
@@ -47,6 +50,12 @@ bool FaceDetection::detectFace()
 
   for( size_t i = 0; i < faces.size(); i++ )
   {
+    // if face detected do noise cancelling
+    if ( i == 0 && denoising)
+    {
+      cv::fastNlMeansDenoisingColored(_image_orig, _image_orig, 6, 3, 7, 21 );
+    }
+    
     Point center( faces[i].x + faces[i].width*0.5, 
         faces[i].y + faces[i].height*0.5 );
 

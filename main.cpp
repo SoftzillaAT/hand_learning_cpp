@@ -83,6 +83,9 @@ cv::Point3f getPOI(PointCloud<PointXYZRGB>::Ptr&);
 void drawCoordinateSystem(cv::Mat &im, const Eigen::Matrix4f &pose, const cv::Mat_<double> &intrinsic, const cv::Mat_<double> &dist_coeffs, double size, int thickness);
 void drawConfidenceBar(cv::Mat &im, const double &conf, int x_start=50, int x_end=200, int y=30);
 
+
+static void onMouse(int event, int x, int y, int f, void *);
+
 bool lexico_compare2f(const cv::Point2f& p1, const cv::Point2f& p2);
 bool points_are_equal2f(const cv::Point2f& p1, const cv::Point2f& p2);
 bool lexico_compare3f(const cv::Point3f& p1, const cv::Point3f& p2);
@@ -102,7 +105,7 @@ PointCloud<PointXYZRGB>::Ptr mycloud (new PointCloud<PointXYZRGB>); 	// A cloud 
 Grabber* openniGrabber;                                               	// OpenNI grabber that takes data from the device.
 unsigned int filesSaved = 0;                                          	// For the numbering of the clouds saved to disk.
 bool stopCamera(false);							// Stop the camera callback
-enum Mode { capture, calibration, tracking, stop };					// Current mode
+enum Mode { capture, calibration, parameters, tracking, stop };					// Current mode
 Mode mode = capture;							// Start with capturing images
 
 v4r::TSFVisualSLAM tsf;
@@ -124,6 +127,7 @@ uint64_t timestamp;
 
 cv::Mat_<cv::Vec3b> image;
 cv::Mat_<cv::Vec3b> im_draw;
+cv::Mat_<cv::Vec3b> im_cb;
 pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
 
 std::string cam_file, filenames;
@@ -136,7 +140,7 @@ cv::Mat_<double> dist_coeffs_opti = cv::Mat::zeros(4, 1, CV_64F);
 cv::Mat_<double> intrinsic_opti = cv::Mat_<double>::eye(3,3);
 
 Eigen::Matrix4f pose;
-float voxel_size = 0.0005;//0.0005;
+float voxel_size = 0.0001;//0.0005;
 double thr_weight = 2;      //e.g. 10    // surfel threshold for the final model
 double thr_delta_angle = 80; // e.g. 80
 int poisson_depth = 6;
@@ -157,6 +161,7 @@ cv::Point3f min_point; // nearest point to camera
 // camera parameter
 Camera cam;
 SkinDetection skin_detection;
+FaceDetection face;
 
 bool view_error = false;
 bool filediskmode = false;
@@ -177,10 +182,13 @@ int v_range = 10;
 
 // Cluster params
 int useGrabCut = 0;
-int track_image = 1;
+int track_image = 0;
 
 int max_loose_pose = 5; 						// Maximum number of lost poses until the grabber ends
 int frame_counter = 0;              // Counts the numbers of tracking frames
+int minBinSize = 10;                // Minimum number of entries in a bin of the histogram
+int minBinSizeLum = 10;
+int sigmaScale = 20;
 std::vector<cv::Vec3b> skin_points;
 cv::Point3f obj_point(0, 0, 0);
 
@@ -232,7 +240,8 @@ int main(int argc, char** argv)
 	
 	// trackbars
 	cv::namedWindow("trackbars",CV_WINDOW_KEEPRATIO);
-	//cv::createTrackbar("Max camera distance [cm]","trackbars", &min_camera_distance, 400);
+
+  //cv::createTrackbar("Max camera distance [cm]","trackbars", &min_camera_distance, 400);
 	//cv::createTrackbar("Mean_shift radius [cm]","trackbars", &mean_shift_radius, 100);
 	//cv::createTrackbar("Number of patricles","trackbars", &num_particles, 200);
 	//cv::createTrackbar("Number of calibraion frames","trackbars", &num_calibration_frames, 1000);
@@ -244,7 +253,12 @@ int main(int argc, char** argv)
 	cv::createTrackbar("Use grabCut", "trackbars", &useGrabCut, 1);
 	cv::createTrackbar("Max loose Pose", "trackbars", &max_loose_pose, 10);
 	cv::createTrackbar("TrackImage", "trackbars", &track_image, 1);
+	cv::createTrackbar("MinBinSize", "trackbars", &minBinSize, 300);
+	cv::createTrackbar("MinBinSizeLuminance", "trackbars", &minBinSizeLum, 300);
+	cv::createTrackbar("Sigma Scale", "trackbars", &sigmaScale, 50);
 	
+  cv::namedWindow("orig 2D");
+  setMouseCallback("orig 2D", onMouse, 0);
 
 	while(!stopCamera)
 	{
@@ -283,6 +297,28 @@ void printUsage(const char* programName)
 }
 
 
+static void onMouse(int event, int x, int y, int f, void *)
+{
+
+  Mat image = im_cb.clone();
+  Vec3b pix = image.at<Vec3b>(y,x);
+
+  int B = pix.val[0];
+  int G = pix.val[1];
+  int R = pix.val[2];
+
+  int rgb_sum = R + G + B;
+  float norm_R = (float) R / rgb_sum;
+  float norm_G = (float) G / rgb_sum;
+
+  stringstream s;
+  s << "rgR=(" << norm_R << ", " << norm_G << ", " << R << ") at (y,x): (" << y << "," << x << ")";
+  putText(image, s.str().c_str(), Point(17,15), FONT_HERSHEY_SIMPLEX, .6, Scalar(0,255,0), 1);
+
+  imshow("orig 2D", image);
+}
+
+
 
 /*********************************************************************
  * This function is called every time the device has new data.
@@ -290,7 +326,6 @@ void printUsage(const char* programName)
 void grabberCallback(const PointCloud<PointXYZRGBA>::ConstPtr& cloud)
 {
 
-	 
 	clock_t gstart, gend, start, end;
 	gstart = clock();
 	DEBUG(2, cout << "Callback..." << endl);
@@ -323,15 +358,16 @@ void grabberCallback(const PointCloud<PointXYZRGBA>::ConstPtr& cloud)
   image.copyTo(im_draw);
   cv::imshow("orig",im_draw);
 
-  DEBUG(2, cout << "Mode Capture" << endl);
   cam.convertImage(*mycloud, image);
-  FaceDetection face(image);
+  image.copyTo(im_cb);
+  //cv::imshow("orig 2D", im_cb);
 
   int key= cv::waitKey(10);
   if (mode == capture)
   {
-
-    if(face.detectFace())
+    DEBUG(2, cout << "Mode Capture" << endl);
+    face.setImage(image);
+    if(face.detectFace(false))
     {
       face.showResult();
     }
@@ -351,20 +387,12 @@ void grabberCallback(const PointCloud<PointXYZRGBA>::ConstPtr& cloud)
   if (mode == calibration)
   {
     // Detect face for tracking
-    if (face.detectFace())
+    face.setImage(image);
+    if (face.detectFace(false))
     {
-      skin_detection.init(face.getFace(), face.getFaceMask());
+      
       face.showResult();
-      // get color from skin
-      skin_points = face.getSkinPoints();
-      cout << "FOUND COLORS: " << skin_points[0] << endl;
-
-      //skin_points.push_back(cv::Vec3b(178,114,146));
-      //skin_points.push_back(cv::Vec3b(4,121,129));
-      mode = tracking;
-
-      cout << "HOLD OBJECT TO CAMERA AND PRESS SPACE" << endl;
-      cv::waitKey();
+      mode = parameters;     
     }
     else
     {
@@ -372,10 +400,39 @@ void grabberCallback(const PointCloud<PointXYZRGBA>::ConstPtr& cloud)
     }
   }
 
+
+  if (mode == parameters)
+  {
+
+    cout << "PRESS ENTER TO SUBMIT CHANGES" << endl;
+    skin_detection.minBinSize = minBinSize;
+    skin_detection.minBinSizeLum = minBinSizeLum;
+    skin_detection.scale = (float)sigmaScale / 10.0;
+    skin_detection.init(face.getFace(), face.getFaceMask());
+    int key2 = cv::waitKey();
+
+    if (key2 == 10)
+    {
+      // get color from skin
+      //skin_points = face.getSkinPoints();
+      //cout << "FOUND COLORS: " << skin_points[0] << endl;
+
+      //skin_points.push_back(cv::Vec3b(178,114,146));
+      //skin_points.push_back(cv::Vec3b(4,121,129));
+
+
+      cout << "HOLD OBJECT TO CAMERA AND PRESS SPACE" << endl;
+      cv::waitKey();
+
+      mode = tracking;
+    }
+
+  }
+
   if (mode == tracking)
   {
     frame_counter++;
-    
+
     // skip first 3 frames
     if (frame_counter < 3)
       return;
@@ -387,6 +444,7 @@ void grabberCallback(const PointCloud<PointXYZRGBA>::ConstPtr& cloud)
 
     cam.convertImage(*mycloud, image);
     ObjSegmentation seg(image, cam);
+    skin_detection.scale = (float)sigmaScale/10.0;
     Mat skin_mask = skin_detection.getSkinMask(image);
     imshow("New Skin Mask", skin_mask);
     //seg.setSkinMask(skin_points, h_range, s_range, v_range, hyst_dist);
@@ -447,6 +505,17 @@ void grabberCallback(const PointCloud<PointXYZRGBA>::ConstPtr& cloud)
   }
 
 
+  // If user hits 'r' reset
+  if (((char)key) == 'r')
+  {
+    mode = capture;
+  }
+  
+  // If user hits 'r' reset
+  if (((char)key) == 'p')
+  {
+    mode = parameters;
+  }
   // If user hits 'ESC'
   if (((char)key) == 27)
   {

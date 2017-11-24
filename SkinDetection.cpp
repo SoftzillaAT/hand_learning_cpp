@@ -2,6 +2,9 @@
 
 SkinDetection::SkinDetection()
 {
+  minBinSize = 10;
+  minBinSizeLum = 10;
+  scale = 2;
 }
 
 
@@ -12,7 +15,7 @@ bool SkinDetection::init(Mat face, Mat face_mask)
   int ymin;
   int ymax;
 
-  this->calculateRangeHist(y_face, face_mask, ymin, ymax, "Luminance Hist");
+  this->calculateRangeHist(y_face, face_mask, ymin, ymax, minBinSizeLum, "Luminance Hist");
 
 
   cout << "YMIN: " << ymin << " | YMAX: " << ymax << endl;
@@ -60,17 +63,17 @@ bool SkinDetection::init(Mat face, Mat face_mask)
   int rmin=0, gmin=0, Rmin=0;
   int rmax=255, gmax=255, Rmax=255;
   // disable hist range
-  this->calculateRangeHist(matNormR, face_mask, rmin, rmax, "Norm r histogram"); 
-  this->calculateRangeHist(matNormG, face_mask, gmin, gmax, "Norm g histogram"); 
-  this->calculateRangeHist(matR, face_mask, Rmin, Rmax, "R histogram"); 
+  this->calculateRangeHist(matNormR, face_mask, rmin, rmax, minBinSize, "Norm r histogram"); 
+  this->calculateRangeHist(matNormG, face_mask, gmin, gmax, minBinSize, "Norm g histogram"); 
+  this->calculateRangeHist(matR, face_mask, Rmin, Rmax, minBinSize, "R histogram"); 
 
-  float mu_r = 0;
-  float mu_g = 0;
-  float mu_R = 0;
+  mu_r = 0;
+  mu_g = 0;
+  mu_R = 0;
 
-  float sigma_r = 0;
-  float sigma_g = 0;
-  float sigma_R = 0;
+  sigma_r = 0;
+  sigma_g = 0;
+  sigma_R = 0;
 
   int rcounter = 0;
   int gcounter = 0;
@@ -146,7 +149,7 @@ bool SkinDetection::init(Mat face, Mat face_mask)
         sigma_r += pow(r - mu_r, 2);
       }
 
-      if (gmin < r*255 && r*255 < gmax)
+      if (gmin < g*255 && g*255 < gmax)
       {
         sigma_g += pow(g - mu_g, 2);
       }
@@ -163,23 +166,23 @@ bool SkinDetection::init(Mat face, Mat face_mask)
   sigma_R = sqrt(sigma_R / Rcounter);
 
 
-  _rLowBound = mu_r - 3.5 * sigma_r;
-  _gLowBound = mu_g - 3.5 * sigma_g;
-  _RLowBound = mu_R - 3.5 * sigma_R;
+  _rLowBound = mu_r - scale * sigma_r;
+  _gLowBound = mu_g - scale * sigma_g;
+  _RLowBound = mu_R - scale * sigma_R * 2;
 
-  _rUpBound = mu_r + 3.5 * sigma_r;
-  _gUpBound = mu_g + 3.5 * sigma_g;
-  _RUpBound = mu_R + 3.5 * sigma_R;
+  _rUpBound = mu_r + scale * sigma_r;
+  _gUpBound = mu_g + scale * sigma_g;
+  _RUpBound = mu_R + scale * sigma_R;
 
 
-  cout << _rLowBound << " | " << _rUpBound << endl;
-  cout << _gLowBound << " | " << _gUpBound << endl;
-  cout << _RLowBound << " | " << _RUpBound << endl;
+  cout << "r-RANGE: " << _rLowBound << " | " << _rUpBound << endl;
+  cout << "g-RANGE: " <<_gLowBound << " | " << _gUpBound << endl;
+  cout << "R-RANGE: " << _RLowBound << " | " << _RUpBound << endl;
 
   return true;
 }
 
-void SkinDetection::calculateRangeHist(Mat img, Mat mask, int &min, int &max, string imTitle)
+void SkinDetection::calculateRangeHist(Mat img, Mat mask, int &min, int &max, int minBinEntries,  string imTitle)
 {
   // Separate the image in 3 places ( B, G and R )
   vector<Mat> col_planes;
@@ -189,7 +192,7 @@ void SkinDetection::calculateRangeHist(Mat img, Mat mask, int &min, int &max, st
   int histSize = 128;
 
   // Min number of values for a bin, not to be trimmed
-  int minBinEntries = 10;
+  // minBinEntries = 10;
 
   /// Set the ranges ( for B,G,R) )
   float range[] = { 0, 256 } ;
@@ -234,7 +237,7 @@ void SkinDetection::calculateRangeHist(Mat img, Mat mask, int &min, int &max, st
   int maxLoc = maxLocPoint.y;
   int trim_right = histSize - 1;
   
-  cout << "Max Loc: " << maxLoc << ": " << maxVal << endl;
+  //cout << "Max Loc: " << maxLoc << ": " << maxVal << endl;
     
   for (int i = maxLoc; i < histSize; i++)
   {
@@ -272,6 +275,13 @@ void SkinDetection::calculateRangeHist(Mat img, Mat mask, int &min, int &max, st
 
 Mat SkinDetection::getSkinMask(Mat image)
 {
+  _rLowBound = mu_r - scale * sigma_r;
+  _gLowBound = mu_g - scale * sigma_g;
+  _RLowBound = mu_R - scale * sigma_R * 2;
+
+  _rUpBound = mu_r + scale * sigma_r;
+  _gUpBound = mu_g + scale * sigma_g;
+  _RUpBound = mu_R + scale * sigma_R;
 
   Mat mask  = Mat::zeros(image.rows, image.cols, CV_8UC1);
 

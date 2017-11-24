@@ -87,6 +87,10 @@ void Camera::convertImage(const pcl::PointCloud<pcl::PointXYZRGB> &_cloud, cv::M
       cv_pt[0] = pt.b;
     }
   }
+
+  // Image denoising
+  //cv::fastNlMeansDenoisingColored(_image, _image, 30, 3, 7, 21 );
+  //cv::fastNlMeansDenoising(_image, _image, 30.0, 7, 21 );
 }
 
 /*********************************************************************
@@ -197,3 +201,7 @@ void Camera::drawCircle(cv::Mat &img, cv::Point3f center, int radius, cv::Scalar
 				std::vector<cv::Point2f> centerPoint = projectPoints(tmpPoints);
 				cv::circle(img, centerPoint[0], radius, color, thickness);
 }
+
+
+
+

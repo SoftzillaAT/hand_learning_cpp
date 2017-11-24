@@ -3,6 +3,7 @@
 #define FACEDETECTION_H
 
 #include <iostream>
+#include <opencv2/opencv.hpp>
 #include <opencv2/core/core.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
 #include <opencv2/highgui/highgui.hpp>
@@ -37,9 +38,10 @@ class FaceDetection
     void calcHistogram();
     std::vector<cv::Point3f> getHsvCylinder();
   public:
-    FaceDetection(Mat image);
+    FaceDetection();
+    void setImage(Mat image);
     void showResult();
-    bool detectFace();
+    bool detectFace(bool denoising);
     Mat getFace();
     Mat getFaceMask();
     std::vector< cv::Vec3b > getSkinPoints();

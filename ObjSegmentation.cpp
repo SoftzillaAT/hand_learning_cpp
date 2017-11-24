@@ -232,7 +232,7 @@ void ObjSegmentation::clusterObject(PointCloud<PointXYZRGB>::Ptr& cloud, Point3f
 
   //  dilating the skin mask
   Mat output_mask = closing_mask;
-  kernel = Mat::ones(21,21, CV_8UC1);
+  kernel = Mat::ones(13,13, CV_8UC1);
   cv::dilate(output_mask, output_mask, kernel);
   cv::imshow("dilating", output_mask);
 
